@@ -12,6 +12,9 @@ export interface Config {
   contextValue: string;
   usageValue: string;
   debug: boolean;
+  quotaLayout: string;
+  resetFormat: string;
+  showPlanTier: boolean;
 }
 
 export function defaultConfig(): Config {
@@ -26,7 +29,10 @@ export function defaultConfig(): Config {
     showIcons: true,
     contextValue: "percent",
     usageValue: "remaining",
-    debug: false
+    debug: false,
+    quotaLayout: "default",
+    resetFormat: "time",
+    showPlanTier: true
   };
 }
 
@@ -59,5 +65,8 @@ function merge(base: Config, patch: Record<string, unknown>): Config {
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
   if (typeof patch.debug === "boolean") base.debug = patch.debug;
+  if (typeof patch.quota_layout === "string" && patch.quota_layout !== "") base.quotaLayout = patch.quota_layout;
+  if (typeof patch.reset_format === "string" && patch.reset_format !== "") base.resetFormat = patch.reset_format;
+  if (typeof patch.show_plan_tier === "boolean") base.showPlanTier = patch.show_plan_tier;
   return base;
 }

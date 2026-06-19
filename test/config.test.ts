@@ -56,3 +56,17 @@ test("load uses first existing path", () => {
 
   assert.equal(loadFromPaths([first, second]).showCWD, false);
 });
+
+test("load parses new quota layout and format options", () => {
+  const path = "/tmp/test-config-new-opts.json";
+  fs.writeFileSync(path, JSON.stringify({
+    quota_layout: "stacked",
+    reset_format: "duration",
+    show_plan_tier: false
+  }));
+  const config = loadFromPaths([path]);
+  assert.strictEqual(config.quotaLayout, "stacked");
+  assert.strictEqual(config.resetFormat, "duration");
+  assert.strictEqual(config.showPlanTier, false);
+  fs.unlinkSync(path);
+});
