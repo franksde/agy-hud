@@ -58,7 +58,7 @@ If you are an AI agent installing `agy-hud` for someone, do not install silently
 
    Tell them what they are looking at: model and plan tier, working directory, git branch, a context bar with token detail (`context_value: both`), quota remaining as a continuous bar, local reset time, and agent state. The default config shows a more compact `percent` context. Icons need a Nerd Font — without one they render as boxes — and the HUD degrades cleanly on narrow terminals.
 
-2. Ask the user to confirm the effect, or whether they want to adjust `multiline`, `show_icons`, `context_value`, or `usage_value` (see [Config](#config)).
+2. Ask the user to confirm the effect, or whether they want to adjust `multiline`, `show_icons`, `context_value`, or `usage_value`. Consult the [Example Configurations](#example-configurations) section to show them the alternate styles available.
 
 3. After the user confirms, download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, then extract it.
 
@@ -118,6 +118,59 @@ Display options:
 - `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.
 - `usage_value`: `remaining` or `percent`. Default is `remaining`, so quota text and bar show what is left, for example `Usage ███░░░░░ 40% left ↻ Reset 17:33`.
+
+### Example Configurations
+
+**1. Single Line** (`"multiline": false`)
+
+```json
+{
+  "multiline": false
+}
+```
+
+```text
+ 3.5 Flash High | Free  Ctx 13%  (130k/1M)  █░░░░░░░  Thinking
+```
+
+**2. No Icons** (`"show_icons": false`)
+
+```json
+{
+  "show_icons": false
+}
+```
+
+```text
+3.5 Flash High | Free │ project │ main
+Context █░░░░░░░ 13% │ Thinking
+```
+
+**3. Token Detail** (`"context_value": "both"`)
+
+```json
+{
+  "context_value": "both"
+}
+```
+
+```text
+ 3.5 Flash High | Free │  project │  main
+Context █░░░░░░░ 13% (130k/1M) │ Thinking
+```
+
+**4. Usage Percent** (`"usage_value": "percent"`)
+
+```json
+{
+  "usage_value": "percent"
+}
+```
+
+```text
+ 3.5 Flash High | Free │  project │  main
+Context █░░░░░░░ 13% (130k/1M) │ Thinking
+```
 
 ## Quota Cache
 
