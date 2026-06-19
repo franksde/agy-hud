@@ -5,7 +5,7 @@ import path from "node:path";
 import { strip, visibleLen } from "../src/ansi";
 import { defaultConfig, Config } from "../src/config";
 import { Cache } from "../src/quota";
-import { Payload, render, shortModelName } from "../src/statusline";
+import { Payload, render, shortModelName, renderModelSegment } from "../src/statusline";
 
 function fixturePayload(): Payload {
   return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "testdata", "statusline_payload.json"), "utf8"));
@@ -344,4 +344,11 @@ test("width degradation keeps every line within terminal width", () => {
       assert.ok(visibleLen(line) <= width, `width ${width} exceeded by line ${JSON.stringify(line)}`);
     }
   }
+});
+
+test("renderModelSegment respects showPlanTier", () => {
+  const config = defaultConfig();
+  config.showPlanTier = false;
+  const result = renderModelSegment("Gemini", "Pro", config);
+  assert.strictEqual(result.includes("Pro"), false);
 });
