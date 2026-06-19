@@ -168,7 +168,7 @@ Context █░░░░░░░ 13% (130k/1M) │ Thinking
 ```
 
 ```text
- 3.5 Flash High | Pro │  project │  main
+ 󰊤 3.5 Flash High | Pro │ 󰉋 project │  main
 Context █░░░░░░░ 13% (130k/1M) │ Usage ██████░░ 60% ↻ Reset 17:33 │ Thinking
 ```
 
