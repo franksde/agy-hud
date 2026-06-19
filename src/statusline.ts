@@ -195,7 +195,10 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
 
 export function renderModelSegment(shortModel: string, rawPlan: string, config: Config): string {
   if (!config.showPlanTier) {
-    return `${withIcon(config, " ", "")}${shortModel}`;
+    if (config.showModel && shortModel !== "") {
+      return `${withIcon(config, " ", "")}${shortModel}`;
+    }
+    return "";
   }
   let plan = "Plan ?";
   if (rawPlan === "Google AI Pro") {
