@@ -53,14 +53,21 @@ export function configPaths(): string[] {
   if (explicit) {
     paths.push(explicit);
   }
+  paths.push(path.join(process.cwd(), ".agents", "plugins", "agy-hud", "config.json"));
+  
+  const home = os.homedir();
+  if (home) {
+    paths.push(path.join(home, ".gemini", "config", "plugins", "agy-hud", "config.json"));
+  }
+
   const dir = path.dirname(__filename);
   paths.push(path.join(dir, "config.json"));
   paths.push(path.join(dir, "..", "config.json"));
+  
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
     paths.push(path.join(xdg, "agy-hud", "config.json"));
   }
-  const home = os.homedir();
   if (home) {
     paths.push(path.join(home, ".config", "agy-hud", "config.json"));
   }
