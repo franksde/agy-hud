@@ -12,6 +12,7 @@
 
 - 支持插件的 Antigravity CLI
 - `PATH` 中可用的 Node.js 18+
+- 安装并配置为终端字体的 [Nerd Font](https://www.nerdfonts.com/) (以正确渲染图标)
 
 `agy-hud` 以 Antigravity 插件归档包分发,不是 npm 包。归档包内已包含打包后的运行脚本 `dist/agy-hud.js`,所以插件用户不需要运行 `npm install`。
 

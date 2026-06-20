@@ -12,6 +12,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 - Antigravity CLI with plugin support
 - Node.js 18+ available on `PATH`
+- A [Nerd Font](https://www.nerdfonts.com/) set as your terminal emulator's font (to render the icons properly)
 
 `agy-hud` is distributed as an Antigravity plugin archive, not as an npm package. The archive includes the bundled runtime script at `dist/agy-hud.js`, so plugin users do not need to run `npm install`.
 
