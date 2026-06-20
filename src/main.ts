@@ -8,6 +8,9 @@ import { RefreshResult, refreshQuota } from "./quotaProbe";
 import { branch as gitBranch } from "./gitinfo";
 import { Payload, render } from "./statusline";
 
+const logPath = path.join(os.tmpdir(), "hud-debug.log");
+try { fs.appendFileSync(logPath, "agy-hud.js started\n"); } catch(e) {}
+
 export const version = "0.1.4";
 
 interface StatuslineRefreshState {

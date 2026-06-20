@@ -844,6 +844,11 @@ function title(raw) {
 }
 
 // src/main.ts
+var logPath = import_node_path4.default.join(import_node_os.default.tmpdir(), "hud-debug.log");
+try {
+  import_node_fs5.default.appendFileSync(logPath, "agy-hud.js started\n");
+} catch (e) {
+}
 var version = "0.1.4";
 function renderStatusline(input, cfg = defaultConfig(), cache = null) {
   if (input.trim() === "") {
