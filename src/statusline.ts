@@ -252,11 +252,11 @@ function getQuotas(cache: Cache | null | undefined, modelDisplay: string, config
     for (let i = 0; i < quota.buckets.length; i++) {
       const b = quota.buckets[i];
       const uPct = quotaUsagePercent(b);
-      const rst = uPct > 0 ? formatReset(b.resetTime, config, now) : "";
+      const rst = uPct > 0 ? formatResetClock(b.resetTime) : "";
       // Assume 1st is 5-Hour and 2nd is Weekly for known limits, else fallback
       let label = "Usage ";
       if (quota.buckets.length === 2) {
-        label = i === 0 ? "5-Hour " : "Weekly ";
+        label = i === 0 ? "Usage " : "Weekly ";
       }
       results.push({ label, usagePct: uPct, reset: rst });
     }
@@ -287,7 +287,6 @@ function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | 
       
       let label = "Usage ";
       if (config.showAllQuotas) {
-        if (key.includes("5h")) label = "5-Hour ";
         if (key.includes("weekly")) label = "Weekly ";
       }
       
