@@ -154,12 +154,11 @@ test("agent state can be hidden", () => {
 });
 
 test("context value formats", () => {
-  const cases: Record<string, string> = {
-    percent: "Context █░░░░░░░ 12%",
-    tokens: "Context █░░░░░░░ 130k/1M",
-    both: "Context █░░░░░░░ 12% (130k/1M)"
-  };
-  for (const [value, want] of Object.entries(cases)) {
+  for (const [value, want] of [
+    ["percent", "Context █░░░░░░░ 12%"],
+    ["tokens", "Context █░░░░░░░ 125k/1M"],
+    ["both", "Context █░░░░░░░ 12% (125k/1M)"]
+  ] as const) {
     const config = defaultConfig();
     config.color = false;
     config.contextValue = value;
@@ -283,7 +282,7 @@ test("single-line can show token detail only when it fits", () => {
   config.showProgressBar = false;
   const out = strip(renderFixture(config));
   assert.doesNotMatch(out, /\n/);
-  assert.match(out, /\(130k\/1M\)/);
+  assert.match(out, /\(125k\/1M\)/);
 
   const payload = fixturePayload();
   payload.terminal_width = 35;
