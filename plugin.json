@@ -6,7 +6,7 @@
     "hooks": [
       {
         "type": "status-line",
-        "command": "hooks/status-line.sh"
+        "command": "node dist/agy-hud.js statusline"
       }
     ]
   }

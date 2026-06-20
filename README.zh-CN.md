@@ -36,7 +36,7 @@ tar -xzf agy-hud.tar.gz
 agy plugin install .\agy-hud
 ```
 
-解压出的目录就是一个完整的插件(包含 `plugin.json`、`hooks/`、`dist/`),可以直接传给 `agy plugin install`。它需要 Node.js 18+,解压后不需要再运行 `npm install`。
+解压出的目录就是一个完整的插件(包含 `plugin.json`、`dist/`),可以直接传给 `agy plugin install`。它需要 Node.js 18+,解压后不需要再运行 `npm install`。
 
 ## 从本地路径安装
 
@@ -80,7 +80,7 @@ GitHub release 会发布一个平台无关归档包:
 
 - `agy-hud.tar.gz`
 
-归档包应包含 `plugin.json`、`hooks/status-line.sh`、`dist/agy-hud.js`、`config.example.json`、`README.md`、`README.zh-CN.md`、`LICENSE` 以及相关文档。
+归档包应包含 `plugin.json`、`dist/agy-hud.js`、`config.example.json`、`README.md`、`README.zh-CN.md`、`LICENSE` 以及相关文档。
 
 ## CLI
 

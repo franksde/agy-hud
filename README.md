@@ -36,7 +36,7 @@ tar -xzf agy-hud.tar.gz
 agy plugin install .\agy-hud
 ```
 
-The extracted directory is a complete plugin (`plugin.json`, `hooks/`, `dist/`), so it can be passed straight to `agy plugin install`. It runs with Node.js 18+ and does not require `npm install` after extraction.
+The extracted directory is a complete plugin (`plugin.json`, `dist/`), so it can be passed straight to `agy plugin install`. It runs with Node.js 18+ and does not require `npm install` after extraction.
 
 ## Install From Local Path
 
@@ -80,7 +80,7 @@ GitHub releases are expected to publish one platform-independent archive:
 
 - `agy-hud.tar.gz`
 
-The archive should contain `plugin.json`, `hooks/status-line.sh`, `dist/agy-hud.js`, `config.example.json`, `README.md`, `README.zh-CN.md`, `LICENSE`, and supporting docs.
+The archive should contain `plugin.json`, `dist/agy-hud.js`, `config.example.json`, `README.md`, `README.zh-CN.md`, `LICENSE`, and supporting docs.
 
 ## CLI
 
