@@ -44,7 +44,7 @@ export function parseLanguageServerInfo(psOutput: string): LanguageServerInfo | 
 export function parseAgyServerInfos(psOutput: string): LanguageServerInfo[] {
   const infos: LanguageServerInfo[] = [];
   for (const line of psOutput.split(/\r?\n/)) {
-    if (!/(^|\s)(?:\/\S+\/)?agy\s+--/.test(line)) {
+    if (!/(^|\s)(?:\/\S+\/)?agy(\s|$)/.test(line)) {
       continue;
     }
     const parts = line.trim().split(/\s+/);
