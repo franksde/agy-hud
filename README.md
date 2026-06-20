@@ -53,7 +53,7 @@ If you are an AI agent installing `agy-hud` for someone, do not install silently
 
    ```
     3.5 Flash High |  Pro │  agy-hud │  main
-   Context █░░░░░░░ 12% (130k/1M) │ Usage ███░░░░░ 40% left ↻ Reset 17:33 │ Thinking
+   Context █░░░░░░░ 12% (130k/1M) │ Usage ██████░░ 60% ↻ Reset 17:33 │ Thinking
    ```
 
    Tell them what they are looking at: model and plan tier, working directory, git branch, a context bar with token detail (`context_value: both`), quota remaining as a continuous bar, local reset time, and agent state. The default config shows a more compact `percent` context. Icons need a Nerd Font — without one they render as boxes — and the HUD degrades cleanly on narrow terminals.
@@ -117,7 +117,7 @@ Display options:
 - `show_agent_state`: shows stdin `agent_state` such as `Idle`, `Thinking`, or `Auth`.
 - `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.
-- `usage_value`: `remaining` or `percent`. Default is `remaining`, so quota text and bar show what is left, for example `Usage ███░░░░░ 40% left ↻ Reset 17:33`.
+- `usage_value`: `percent` or `remaining`. Default is `percent`, so quota text and bar show what is consumed and tickets upwards, for example `Usage ██████░░ 60% ↻ Reset 17:33`.
 
 ## Quota Cache
 

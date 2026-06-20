@@ -57,7 +57,7 @@ function defaultConfig() {
     showAgentState: true,
     showIcons: true,
     contextValue: "percent",
-    usageValue: "remaining",
+    usageValue: "percent",
     debug: false,
     showAllQuotas: false,
     resetFormat: "time"
@@ -782,9 +782,9 @@ function usageBar(config, usagePct) {
   return progressBarWithColor(fillPct, usagePct, 8, config.color);
 }
 function tokenDetail(ctx) {
-  const total = (ctx?.total_input_tokens ?? 0) + (ctx?.total_output_tokens ?? 0);
+  const total = ctx?.total_input_tokens;
   const windowSize = ctx?.context_window_size ?? 0;
-  if (total <= 0 || windowSize <= 0) {
+  if (typeof total !== "number" || total <= 0 || windowSize <= 0) {
     return "";
   }
   return `(${formatTokens(total)}/${formatTokens(windowSize)})`;
@@ -932,6 +932,11 @@ function configPaths() {
   if (explicit) {
     paths.push(explicit);
   }
+  paths.push(import_node_path4.default.join(process.cwd(), ".agents", "plugins", "agy-hud", "config.json"));
+  const home = import_node_os.default.homedir();
+  if (home) {
+    paths.push(import_node_path4.default.join(home, ".gemini", "config", "plugins", "agy-hud", "config.json"));
+  }
   const dir = import_node_path4.default.dirname(__filename);
   paths.push(import_node_path4.default.join(dir, "config.json"));
   paths.push(import_node_path4.default.join(dir, "..", "config.json"));
@@ -939,7 +944,6 @@ function configPaths() {
   if (xdg) {
     paths.push(import_node_path4.default.join(xdg, "agy-hud", "config.json"));
   }
-  const home = import_node_os.default.homedir();
   if (home) {
     paths.push(import_node_path4.default.join(home, ".config", "agy-hud", "config.json"));
   }

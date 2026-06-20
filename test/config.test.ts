@@ -17,7 +17,7 @@ test("default config matches open-source defaults", () => {
   assert.equal(got.showIcons, true);
   assert.equal(got.debug, false);
   assert.equal(got.contextValue, "percent");
-  assert.equal(got.usageValue, "remaining");
+  assert.equal(got.usageValue, "percent");
 });
 
 test("load merges partial overrides", () => {

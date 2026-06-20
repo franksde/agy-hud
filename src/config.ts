@@ -27,7 +27,7 @@ export function defaultConfig(): Config {
     showAgentState: true,
     showIcons: true,
     contextValue: "percent",
-    usageValue: "remaining",
+    usageValue: "percent",
     debug: false,
     showAllQuotas: false,
     resetFormat: "time"
