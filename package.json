@@ -7,7 +7,7 @@
     "agy-hud": "dist/agy-hud.js"
   },
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/agy-hud.js --banner:js='#!/usr/bin/env node'",
+    "build": "node scripts/build.mjs",
     "build:test": "tsc -p tsconfig.json",
     "test": "npm run build && npm run build:test && node --test build/test/*.test.js"
   },

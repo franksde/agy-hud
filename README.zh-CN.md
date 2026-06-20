@@ -19,11 +19,21 @@
 
 从[最新 release](https://github.com/franksde/agy-hud/releases/latest)下载平台无关归档包:
 
+**Linux / macOS:**
+
 ```sh
 curl -fsSL -o agy-hud.tar.gz \
   https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
 tar -xzf agy-hud.tar.gz
 agy plugin install ./agy-hud
+```
+
+**Windows (PowerShell):**
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz" -OutFile "agy-hud.tar.gz"
+tar -xzf agy-hud.tar.gz
+agy plugin install .\agy-hud
 ```
 
 解压出的目录就是一个完整的插件(包含 `plugin.json`、`hooks/`、`dist/`),可以直接传给 `agy plugin install`。它需要 Node.js 18+,解压后不需要再运行 `npm install`。

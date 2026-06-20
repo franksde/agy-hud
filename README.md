@@ -17,13 +17,23 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Install From GitHub Release
 
-Download the platform-independent archive from the [latest release](https://github.com/franksde/agy-hud/releases/latest):
+Download the platform-independent archive from the [latest release](https://github.com/franksde/agy-hud/releases/latest).
+
+**Linux / macOS:**
 
 ```sh
 curl -fsSL -o agy-hud.tar.gz \
   https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
 tar -xzf agy-hud.tar.gz
 agy plugin install ./agy-hud
+```
+
+**Windows (PowerShell):**
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz" -OutFile "agy-hud.tar.gz"
+tar -xzf agy-hud.tar.gz
+agy plugin install .\agy-hud
 ```
 
 The extracted directory is a complete plugin (`plugin.json`, `hooks/`, `dist/`), so it can be passed straight to `agy plugin install`. It runs with Node.js 18+ and does not require `npm install` after extraction.
