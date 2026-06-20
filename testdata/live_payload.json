@@ -1,0 +1,22 @@
+{
+  "cwd": "/home/ama/github/agy-hud",
+  "terminal_width": 120,
+  "model": { "display_name": "Gemini 3.5 Flash Med" },
+  "plan_tier": "Pro",
+  "vcs": { "branch": "main" },
+  "context_window": {
+    "total_input_tokens": 125000,
+    "context_window_size": 1000000
+  },
+  "quota": {
+    "gemini-5h": {
+      "remaining_fraction": 0.15,
+      "reset_time": "2026-06-19T21:43:20Z"
+    },
+    "gemini-weekly": {
+      "remaining_fraction": 0.52,
+      "reset_time": "2026-06-25T00:00:00Z"
+    }
+  },
+  "agent_state": "idle"
+}
