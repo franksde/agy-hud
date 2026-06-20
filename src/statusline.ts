@@ -1,6 +1,6 @@
 import { Config } from "./config";
 import { strip, visibleLen } from "./ansi";
-import { Cache, matchModel, usagePercent as quotaUsagePercent } from "./quota";
+import { Cache, matchModel, usagePercent as quotaUsagePercent, formatResetDuration } from "./quota";
 import path from "node:path";
 
 const colorReset = "\x1b[0m";
@@ -225,7 +225,7 @@ function renderGitSegment(branch: string, config: Config): string {
 }
 
 function resetSuffix(config: Config, reset: string): string {
-  return ` ${withIcon(config, "↻ ", "")}Reset ${reset}`;
+  return ` (${withIcon(config, "↻ ", "")}${reset})`;
 }
 
 function withIcon(config: Config, icon: string, fallback: string): string {
@@ -264,7 +264,7 @@ function getQuotas(cache: Cache | null | undefined, modelDisplay: string, config
     return results;
   }
   const usagePct = quotaUsagePercent(quota);
-  const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
+  const reset = usagePct > 0 ? formatReset(quota.resetTime, config, now) : "";
   return [{ label: "Usage ", usagePct, reset }];
 }
 
@@ -303,7 +303,6 @@ function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | 
     results[0].label = "Usage ";
     return [results[0]];
   }
-  
   return results;
 }
 
@@ -324,6 +323,11 @@ function formatResetClock(reset: string): string {
     return "";
   }
   return `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;
+}
+
+function formatReset(reset: string, config: Config, now: Date): string {
+  if (config.resetFormat === "duration") return formatResetDuration(reset, now);
+  return formatResetClock(reset);
 }
 
 function contextValue(config: Config, ctx: Payload["context_window"], pct: number): string {

@@ -13,6 +13,7 @@ export interface Config {
   usageValue: string;
   debug: boolean;
   showAllQuotas: boolean;
+  resetFormat: string;
 }
 
 export function defaultConfig(): Config {
@@ -28,7 +29,8 @@ export function defaultConfig(): Config {
     contextValue: "percent",
     usageValue: "remaining",
     debug: false,
-    showAllQuotas: false
+    showAllQuotas: false,
+    resetFormat: "time"
   };
 }
 
@@ -62,5 +64,6 @@ function merge(base: Config, patch: Record<string, unknown>): Config {
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
   if (typeof patch.debug === "boolean") base.debug = patch.debug;
   if (typeof patch.show_all_quotas === "boolean") base.showAllQuotas = patch.show_all_quotas;
+  if (typeof patch.reset_format === "string" && patch.reset_format !== "") base.resetFormat = patch.reset_format;
   return base;
 }
