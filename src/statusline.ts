@@ -1,6 +1,6 @@
 import { Config } from "./config";
 import { strip, visibleLen } from "./ansi";
-import { Cache, matchModel, usagePercent as quotaUsagePercent } from "./quota";
+import { Cache, matchModel, usagePercent as quotaUsagePercent, formatResetDuration } from "./quota";
 import path from "node:path";
 
 const colorReset = "\x1b[0m";
@@ -81,7 +81,7 @@ export function render(payload: Payload, opts: RenderOptions): string {
   const modelSegment = renderModelSegment(shortModelName(modelDisplay), payload.plan_tier ?? "", config);
   const ctxPct = contextPercent(payload.context_window);
   const stateLabel = state(payload.agent_state ?? "");
-  const [usagePct, reset, hasQuota] = quotaInfo(opts.quota, modelDisplay, payload.quota);
+  const [usagePct, reset, hasQuota] = quotaInfo(opts.quota, modelDisplay, config, opts.now ?? new Date(), payload.quota);
   if (config.multiline) {
     return renderMultiline(payload, config, width, modelSegment, ctxPct, usagePct, reset, hasQuota, opts.gitBranch ?? "", stateLabel);
   }
@@ -224,15 +224,15 @@ function renderGitSegment(branch: string, config: Config): string {
 }
 
 function resetSuffix(config: Config, reset: string): string {
-  return ` ${withIcon(config, "↻ ", "")}Reset ${reset}`;
+  return ` (${withIcon(config, "↻ ", "")}${reset})`;
 }
 
 function withIcon(config: Config, icon: string, fallback: string): string {
   return config.showIcons ? icon : fallback;
 }
 
-function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, officialQuota?: Record<string, OfficialQuotaBucket>): [number, string, boolean] {
-  const official = officialQuotaInfo(officialQuota, modelDisplay);
+function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, config: Config, now: Date, officialQuota?: Record<string, OfficialQuotaBucket>): [number, string, boolean] {
+  const official = officialQuotaInfo(officialQuota, modelDisplay, config, now);
   if (official !== null) {
     return official;
   }
@@ -241,11 +241,11 @@ function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, offici
     return [0, "", false];
   }
   const usagePct = quotaUsagePercent(quota);
-  const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
+  const reset = usagePct > 0 ? formatReset(quota.resetTime, config, now) : "";
   return [usagePct, reset, true];
 }
 
-function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | undefined, modelDisplay: string): [number, string, boolean] | null {
+function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | undefined, modelDisplay: string, config: Config, now: Date): [number, string, boolean] | null {
   if (!officialQuota) {
     return null;
   }
@@ -275,7 +275,7 @@ function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | 
     remainingFraction: selected.remaining_fraction ?? 1,
     resetTime: selected.reset_time ?? ""
   });
-  const reset = usagePct > 0 ? formatResetClock(selected.reset_time ?? "") : "";
+  const reset = usagePct > 0 ? formatReset(selected.reset_time ?? "", config, now) : "";
   return [usagePct, reset, true];
 }
 
@@ -296,6 +296,11 @@ function formatResetClock(reset: string): string {
     return "";
   }
   return `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;
+}
+
+function formatReset(reset: string, config: Config, now: Date): string {
+  if (config.resetFormat === "duration") return formatResetDuration(reset, now);
+  return formatResetClock(reset);
 }
 
 function contextValue(config: Config, ctx: Payload["context_window"], pct: number): string {
