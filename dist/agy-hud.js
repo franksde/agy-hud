@@ -60,7 +60,7 @@ function defaultConfig() {
     usageValue: "remaining",
     debug: false,
     showAllQuotas: false,
-    resetFormat: "duration"
+    resetFormat: "time"
   };
 }
 function loadFromPaths(paths) {
