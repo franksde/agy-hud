@@ -81,7 +81,7 @@ export function buildQuotaCache(rawResponse: unknown, now: Date): { cache: unkno
   const planName = typeof planInfo.planName === "string" ? planInfo.planName : "Free";
   const cascade = asRecord(userStatus.cascadeModelConfigData);
   const configs = Array.isArray(cascade.clientModelConfigs) ? cascade.clientModelConfigs : [];
-  const models: Record<string, { remainingFraction: number; resetTime: string }> = {};
+  const models: Record<string, { remainingFraction: number; resetTime: string; buckets?: Array<{remainingFraction: number; resetTime: string;}> }> = {};
 
   for (const item of configs) {
     const model = asRecord(item);
@@ -92,7 +92,15 @@ export function buildQuotaCache(rawResponse: unknown, now: Date): { cache: unkno
     }
     const resetTime = typeof quotaInfo.resetTime === "string" ? quotaInfo.resetTime : "";
     const remainingFraction = typeof quotaInfo.remainingFraction === "number" ? quotaInfo.remainingFraction : resetTime === "" ? 1.0 : 0.0;
-    models[label] = { remainingFraction, resetTime };
+        const rawBuckets = Array.isArray(quotaInfo.buckets) ? quotaInfo.buckets : [];
+    const buckets = [];
+    for (const b of rawBuckets) {
+      const br = asRecord(b);
+      const brReset = typeof br.resetTime === "string" ? br.resetTime : "";
+      const brRem = typeof br.remainingFraction === "number" ? br.remainingFraction : (brReset === "" ? 1.0 : 0.0);
+      buckets.push({ remainingFraction: brRem, resetTime: brReset });
+    }
+    models[label] = { remainingFraction, resetTime, buckets };
   }
   if (Object.keys(models).length === 0) {
     return null;

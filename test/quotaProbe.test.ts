@@ -51,7 +51,8 @@ test("buildQuotaCache converts GetUserStatus response to agy-hud cache shape", (
     models: {
       "Gemini 3.5 Flash (High)": {
         remainingFraction: 0.42,
-        resetTime: "2026-05-20T08:00:00Z"
+        resetTime: "2026-05-20T08:00:00Z",
+        buckets: []
       }
     }
   });
@@ -82,7 +83,8 @@ test("buildQuotaCache treats reset-only quota info as exhausted", () => {
 
   assert.deepEqual((built?.cache as { models: Record<string, { remainingFraction: number }> })?.models["Gemini 3.5 Flash (Medium)"], {
     remainingFraction: 0,
-    resetTime: "2026-06-01T07:52:16Z"
+    resetTime: "2026-06-01T07:52:16Z",
+    buckets: []
   });
   assert.match(built?.summary ?? "", /Gemini 3\.5 Flash \(Medium\).*Usage\s+100%/);
 });

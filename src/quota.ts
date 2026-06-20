@@ -3,6 +3,7 @@ import fs from "node:fs";
 export interface ModelQuota {
   remainingFraction: number;
   resetTime: string;
+  buckets?: Array<{remainingFraction: number; resetTime: string;}>;
 }
 
 export interface Cache {

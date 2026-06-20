@@ -247,6 +247,22 @@ function getQuotas(cache: Cache | null | undefined, modelDisplay: string, config
   if (!ok || quota === null) {
     return [];
   }
+  if (config.showAllQuotas && Array.isArray(quota.buckets) && quota.buckets.length > 0) {
+    const results: QuotaResult[] = [];
+    for (let i = 0; i < quota.buckets.length; i++) {
+      const b = quota.buckets[i];
+      const uPct = quotaUsagePercent(b);
+      const rst = uPct > 0 ? formatReset(b.resetTime, config, now) : "";
+      // Assume 1st is 5-Hour and 2nd is Weekly for known limits, else fallback
+      let label = "Usage ";
+      if (quota.buckets.length === 2) {
+        label = i === 0 ? "5-Hour " : "Weekly ";
+      }
+      results.push({ label, usagePct: uPct, reset: rst });
+    }
+    // We already labeled them, just return
+    return results;
+  }
   const usagePct = quotaUsagePercent(quota);
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
   return [{ label: "Usage ", usagePct, reset }];
@@ -352,7 +368,7 @@ function usageLabel(config: Config, usagePct: number, withBar: boolean, prefix: 
 
 function usageValue(config: Config, usagePct: number): string {
   if (config.usageValue === "remaining") {
-    return `${formatInt(100 - usagePct)}% left`;
+    return `${formatInt(100 - usagePct)}%`;
   }
   return `${formatInt(usagePct)}%`;
 }

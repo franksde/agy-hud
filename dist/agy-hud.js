@@ -211,7 +211,15 @@ function buildQuotaCache(rawResponse, now) {
     }
     const resetTime = typeof quotaInfo.resetTime === "string" ? quotaInfo.resetTime : "";
     const remainingFraction = typeof quotaInfo.remainingFraction === "number" ? quotaInfo.remainingFraction : resetTime === "" ? 1 : 0;
-    models[label] = { remainingFraction, resetTime };
+    const rawBuckets = Array.isArray(quotaInfo.buckets) ? quotaInfo.buckets : [];
+    const buckets = [];
+    for (const b of rawBuckets) {
+      const br = asRecord(b);
+      const brReset = typeof br.resetTime === "string" ? br.resetTime : "";
+      const brRem = typeof br.remainingFraction === "number" ? br.remainingFraction : brReset === "" ? 1 : 0;
+      buckets.push({ remainingFraction: brRem, resetTime: brReset });
+    }
+    models[label] = { remainingFraction, resetTime, buckets };
   }
   if (Object.keys(models).length === 0) {
     return null;
@@ -634,6 +642,20 @@ function getQuotas(cache, modelDisplay, config, now, officialQuota) {
   if (!ok || quota === null) {
     return [];
   }
+  if (config.showAllQuotas && Array.isArray(quota.buckets) && quota.buckets.length > 0) {
+    const results = [];
+    for (let i = 0; i < quota.buckets.length; i++) {
+      const b = quota.buckets[i];
+      const uPct = usagePercent(b);
+      const rst = uPct > 0 ? formatReset(b.resetTime, config, now) : "";
+      let label = "Usage ";
+      if (quota.buckets.length === 2) {
+        label = i === 0 ? "5-Hour " : "Weekly ";
+      }
+      results.push({ label, usagePct: uPct, reset: rst });
+    }
+    return results;
+  }
   const usagePct = usagePercent(quota);
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
   return [{ label: "Usage ", usagePct, reset }];
@@ -723,7 +745,7 @@ function usageLabel(config, usagePct, withBar, prefix) {
 }
 function usageValue(config, usagePct) {
   if (config.usageValue === "remaining") {
-    return `${formatInt(100 - usagePct)}% left`;
+    return `${formatInt(100 - usagePct)}%`;
   }
   return `${formatInt(usagePct)}%`;
 }
