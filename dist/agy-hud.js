@@ -708,7 +708,6 @@ function officialQuotaInfo(officialQuota, modelDisplay, config, now) {
     }
   }
   if (results.length === 0) return sawKnownBucket ? [] : null;
-  results.sort((a, b) => b.usagePct - a.usagePct);
   if (!config.showAllQuotas) {
     results[0].label = "Usage ";
     return [results[0]];

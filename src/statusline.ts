@@ -296,8 +296,6 @@ function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | 
   
   if (results.length === 0) return sawKnownBucket ? [] : null;
   if (!config.showAllQuotas) {
-    // Sort descending by usagePct so the tightest quota is first
-    results.sort((a, b) => b.usagePct - a.usagePct);
     results[0].label = "Usage ";
     return [results[0]];
   }
