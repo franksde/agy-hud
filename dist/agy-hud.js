@@ -60,7 +60,7 @@ function defaultConfig() {
     usageValue: "remaining",
     debug: false,
     showAllQuotas: false,
-    resetFormat: "time"
+    resetFormat: "duration"
   };
 }
 function loadFromPaths(paths) {
@@ -672,7 +672,7 @@ function getQuotas(cache, modelDisplay, config, now, officialQuota) {
     for (let i = 0; i < quota.buckets.length; i++) {
       const b = quota.buckets[i];
       const uPct = usagePercent(b);
-      const rst = uPct > 0 ? formatResetClock(b.resetTime) : "";
+      const rst = uPct > 0 ? formatReset(b.resetTime, config, now) : "";
       let label = "Usage ";
       if (quota.buckets.length === 2) {
         label = i === 0 ? "Usage " : "Weekly ";
@@ -699,7 +699,7 @@ function officialQuotaInfo(officialQuota, modelDisplay, config, now) {
         remainingFraction: bucket.remaining_fraction ?? 1,
         resetTime: bucket.reset_time ?? ""
       });
-      const reset = usagePct > 0 ? formatResetClock(bucket.reset_time ?? "") : "";
+      const reset = usagePct > 0 ? formatReset(bucket.reset_time ?? "", config, now) : "";
       let label = "Usage ";
       if (config.showAllQuotas) {
         if (key.includes("weekly")) label = "Weekly ";

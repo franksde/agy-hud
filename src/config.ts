@@ -30,7 +30,7 @@ export function defaultConfig(): Config {
     usageValue: "remaining",
     debug: false,
     showAllQuotas: false,
-    resetFormat: "time"
+    resetFormat: "duration"
   };
 }
 

@@ -60,7 +60,7 @@ test("multiline default shape uses context and quota", () => {
   assert.doesNotMatch(lines[1], /  \|  |  │  /);
   assert.match(lines[1], /Usage/);
   assert.match(lines[1], /20%/);
-  assert.match(lines[1], /Usage ██░░░░░░ 20% \(↻ \d\d:\d\d\)/);
+  assert.match(lines[1], /Usage ██░░░░░░ 20% \(↻ (\d+h )?\d+m\)/);
   assert.doesNotMatch(lines[1], /↻ 00:44/);
   assert.doesNotMatch(lines[1], /resets/);
   assert.match(lines[1], /Idle/);
@@ -80,7 +80,7 @@ test("remaining quota renders as a context-style bar from precise fraction", () 
 
   const out = strip(renderFixture(config, cache));
 
-  assert.match(out, /Usage ███████░ 85% \(↻ \d\d:\d\d\)/);
+  assert.match(out, /Usage ███████░ 85% \(↻ (\d+h )?\d+m\)/);
   assert.doesNotMatch(out, /\u2009/);
   assert.doesNotMatch(out, /↻ 02:04/);
 });
@@ -117,7 +117,7 @@ test("official quota payload wins over stale quota cache", () => {
     now: new Date("2026-06-15T03:52:00Z")
   }));
 
-  assert.match(out, /Usage ███████░ 84% \(↻ \d\d:\d\d\)/);
+  assert.match(out, /Usage ███████░ 84% \(↻ (\d+h )?\d+m\)/);
   assert.doesNotMatch(out, /20%/);
 });
 
@@ -144,7 +144,7 @@ test("official quota uses third-party buckets for Claude and GPT models", () => 
   }));
 
   assert.match(out, /Sonnet 4\.6/);
-  assert.match(out, /Usage ████░░░░ 48% \(↻ \d\d:\d\d\)/);
+  assert.match(out, /Usage ████░░░░ 48% \(↻ (\d+h )?\d+m\)/);
 });
 
 test("agent state can be hidden", () => {
@@ -200,7 +200,7 @@ test("usage value can show percent used", () => {
   const config = defaultConfig();
   config.color = false;
   config.usageValue = "percent";
-  assert.match(renderFixture(config, cache), /Usage ██████░░ 80% \(↻ \d\d:\d\d\)/);
+  assert.match(renderFixture(config, cache), /Usage ██████░░ 80% \(↻ (\d+h )?\d+m\)/);
   assert.doesNotMatch(renderFixture(config, cache), /↻ 00:44/);
 });
 
