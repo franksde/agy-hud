@@ -382,9 +382,9 @@ function usageBar(config: Config, usagePct: number): string {
 }
 
 function tokenDetail(ctx: Payload["context_window"]): string {
-  const total = (ctx?.total_input_tokens ?? 0) + (ctx?.total_output_tokens ?? 0);
+  const total = ctx?.total_input_tokens;
   const windowSize = ctx?.context_window_size ?? 0;
-  if (total <= 0 || windowSize <= 0) {
+  if (typeof total !== "number" || total <= 0 || windowSize <= 0) {
     return "";
   }
   return `(${formatTokens(total)}/${formatTokens(windowSize)})`;
