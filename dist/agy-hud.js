@@ -58,7 +58,8 @@ function defaultConfig() {
     showIcons: true,
     contextValue: "percent",
     usageValue: "remaining",
-    debug: false
+    debug: false,
+    resetFormat: "time"
   };
 }
 function loadFromPaths(paths) {
