@@ -81,14 +81,14 @@ export function render(payload: Payload, opts: RenderOptions): string {
   const modelSegment = renderModelSegment(shortModelName(modelDisplay), payload.plan_tier ?? "", config);
   const ctxPct = contextPercent(payload.context_window);
   const stateLabel = state(payload.agent_state ?? "");
-  const [usagePct, reset, hasQuota] = quotaInfo(opts.quota, modelDisplay, payload.quota);
+  const quotas = getQuotas(opts.quota, modelDisplay, config, opts.now ?? new Date(), payload.quota);
   if (config.multiline) {
-    return renderMultiline(payload, config, width, modelSegment, ctxPct, usagePct, reset, hasQuota, opts.gitBranch ?? "", stateLabel);
+    return renderMultiline(payload, config, width, modelSegment, ctxPct, quotas, opts.gitBranch ?? "", stateLabel);
   }
-  return renderSingleLine(payload, config, width, modelSegment, ctxPct, usagePct, reset, hasQuota, stateLabel);
+  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quotas, stateLabel);
 }
 
-function renderMultiline(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, usagePct: number, reset: string, hasQuota: boolean, branch: string, stateLabel: string): string {
+function renderMultiline(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quotas: QuotaResult[], branch: string, stateLabel: string): string {
   const line1Parts = [colorize(modelSegment, colorBlue, config.color)];
   if (config.showCWD && payload.cwd) {
     line1Parts.push(colorize(withIcon(config, " ", "") + path.basename(payload.cwd), colorYellow, config.color));
@@ -112,38 +112,39 @@ function renderMultiline(payload: Payload, config: Config, width: number, modelS
   ctx += contextValue(config, payload.context_window, ctxPct);
 
   let usage = "";
-  if (hasQuota) {
-    usage = usageLabel(config, usagePct, true);
-    if (reset !== "") {
-      usage += resetSuffix(config, reset);
-    }
+  if (quotas.length > 0) {
+    usage = joinHeader(...quotas.map(q => {
+      let u = usageLabel(config, q.usagePct, true, q.label);
+      if (q.reset !== "") u += resetSuffix(config, q.reset);
+      return u;
+    }));
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   let line2 = joinHeader(ctx, usage, stateText);
   if (visibleLen(line2) > width) {
     let usageNoBar = "";
-    if (hasQuota) {
-      usageNoBar = usageLabel(config, usagePct, false);
-      if (reset !== "") {
-        usageNoBar += resetSuffix(config, reset);
-      }
+    if (quotas.length > 0) {
+      usageNoBar = joinHeader(...quotas.map(q => {
+        let u = usageLabel(config, q.usagePct, false, q.label);
+        if (q.reset !== "") u += resetSuffix(config, q.reset);
+        return u;
+      }));
     }
     line2 = joinHeader(`Context ${contextValue(config, payload.context_window, ctxPct)}`, usageNoBar, stateText);
   }
   if (visibleLen(line2) > width) {
     let usageCompact = "";
-    if (hasQuota) {
-      usageCompact = usageLabel(config, usagePct, false);
-      if (reset !== "") {
-        usageCompact += resetSuffix(config, reset);
-      }
+    if (quotas.length > 0) {
+      const q = quotas[0];
+      usageCompact = usageLabel(config, q.usagePct, false, q.label);
+      if (q.reset !== "") usageCompact += resetSuffix(config, q.reset);
     }
     line2 = joinHeader(`Context ${formatInt(ctxPct)}%`, usageCompact, stateText);
   }
   if (visibleLen(line2) > width) {
     let coreUsage = "";
-    if (hasQuota) {
-      coreUsage = `Use ${usageValue(config, usagePct)}`;
+    if (quotas.length > 0) {
+      coreUsage = `Use ${usageValue(config, quotas[0].usagePct)}`;
     }
     line2 = join(`Ctx ${formatInt(ctxPct)}%`, coreUsage, stateText);
   }
@@ -154,7 +155,7 @@ function renderMultiline(payload: Payload, config: Config, width: number, modelS
   return `${line1}\n${line2}`;
 }
 
-function renderSingleLine(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, usagePct: number, reset: string, hasQuota: boolean, stateLabel: string): string {
+function renderSingleLine(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quotas: QuotaResult[], stateLabel: string): string {
   const coloredBadge = colorize(modelSegment, colorBlue, config.color);
   const ctx = `Ctx ${contextValue(config, payload.context_window, ctxPct)}`;
   let tokens = tokenDetail(payload.context_window);
@@ -164,12 +165,12 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
     tokens = "";
   }
   let usage = "";
-  if (hasQuota) {
-    let text = `Usage ${usageValue(config, usagePct)}`;
-    if (reset !== "") {
-      text += resetSuffix(config, reset);
-    }
-    usage = colorize(text, colorMuted, config.color);
+  if (quotas.length > 0) {
+    usage = joinHeader(...quotas.map(q => {
+      let u = usageLabel(config, q.usagePct, true, q.label);
+      if (q.reset !== "") u += resetSuffix(config, q.reset);
+      return u;
+    }));
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   let bar = "";
@@ -231,52 +232,64 @@ function withIcon(config: Config, icon: string, fallback: string): string {
   return config.showIcons ? icon : fallback;
 }
 
-function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, officialQuota?: Record<string, OfficialQuotaBucket>): [number, string, boolean] {
-  const official = officialQuotaInfo(officialQuota, modelDisplay);
+export interface QuotaResult {
+  label: string;
+  usagePct: number;
+  reset: string;
+}
+
+function getQuotas(cache: Cache | null | undefined, modelDisplay: string, config: Config, now: Date, officialQuota?: Record<string, OfficialQuotaBucket>): QuotaResult[] {
+  const official = officialQuotaInfo(officialQuota, modelDisplay, config, now);
   if (official !== null) {
     return official;
   }
   const [quota, ok] = matchModel(cache, modelDisplay);
   if (!ok || quota === null) {
-    return [0, "", false];
+    return [];
   }
   const usagePct = quotaUsagePercent(quota);
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
-  return [usagePct, reset, true];
+  return [{ label: "Usage ", usagePct, reset }];
 }
 
-function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | undefined, modelDisplay: string): [number, string, boolean] | null {
-  if (!officialQuota) {
-    return null;
-  }
+function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | undefined, modelDisplay: string, config: Config, now: Date): QuotaResult[] | null {
+  if (!officialQuota) return null;
   const keys = officialQuotaKeys(modelDisplay);
-  const buckets: OfficialQuotaBucket[] = [];
+  const results: QuotaResult[] = [];
   let sawKnownBucket = false;
+
   for (const key of keys) {
-    if (!Object.prototype.hasOwnProperty.call(officialQuota, key)) {
-      continue;
-    }
+    if (!Object.prototype.hasOwnProperty.call(officialQuota, key)) continue;
     sawKnownBucket = true;
     const bucket = officialQuota[key];
     if (Number.isFinite(bucket.remaining_fraction)) {
-      buckets.push(bucket);
+      const usagePct = quotaUsagePercent({
+        remainingFraction: bucket.remaining_fraction ?? 1,
+        resetTime: bucket.reset_time ?? ""
+      });
+      const reset = usagePct > 0 ? formatResetClock(bucket.reset_time ?? "") : "";
+      
+      let label = "Usage ";
+      if (config.showAllQuotas) {
+        if (key.includes("5h")) label = "5-Hour ";
+        if (key.includes("weekly")) label = "Weekly ";
+      }
+      
+      results.push({ label, usagePct, reset });
     }
   }
-  if (buckets.length === 0) {
-    return sawKnownBucket ? [0, "", false] : null;
+  
+  if (results.length === 0) return sawKnownBucket ? [] : null;
+  
+  // Sort descending by usagePct so the tightest quota is first
+  results.sort((a, b) => b.usagePct - a.usagePct);
+  
+  if (!config.showAllQuotas) {
+    results[0].label = "Usage ";
+    return [results[0]];
   }
-  let selected = buckets[0];
-  for (const bucket of buckets.slice(1)) {
-    if ((bucket.remaining_fraction ?? 1) < (selected.remaining_fraction ?? 1)) {
-      selected = bucket;
-    }
-  }
-  const usagePct = quotaUsagePercent({
-    remainingFraction: selected.remaining_fraction ?? 1,
-    resetTime: selected.reset_time ?? ""
-  });
-  const reset = usagePct > 0 ? formatResetClock(selected.reset_time ?? "") : "";
-  return [usagePct, reset, true];
+  
+  return results;
 }
 
 function officialQuotaKeys(modelDisplay: string): string[] {
@@ -329,8 +342,8 @@ function contextPercent(ctx: Payload["context_window"]): number {
   return clampInt(Math.trunc(upstream + 0.5));
 }
 
-function usageLabel(config: Config, usagePct: number, withBar: boolean): string {
-  let label = "Usage ";
+function usageLabel(config: Config, usagePct: number, withBar: boolean, prefix: string): string {
+  let label = prefix;
   if (withBar && config.showProgressBar) {
     label += `${usageBar(config, usagePct)} `;
   }
