@@ -344,3 +344,29 @@ test("width degradation keeps every line within terminal width", () => {
     }
   }
 });
+
+test("official quota maintains stable order when showAllQuotas is true", () => {
+  const payload = fixturePayload();
+  payload.quota = {
+    "gemini-5h": {
+      remaining_fraction: 1.0, // 0% consumed
+      reset_time: "2026-06-15T08:21:23Z"
+    },
+    "gemini-weekly": {
+      remaining_fraction: 0.24, // 76% consumed (tighter)
+      reset_time: "2026-06-21T08:21:23Z"
+    }
+  };
+  const config = defaultConfig();
+  config.color = false;
+  config.showAllQuotas = true;
+
+  const out = strip(render(payload, {
+    config,
+    gitBranch: "main",
+    now: new Date("2026-06-15T03:52:00Z")
+  }));
+
+  // Usage should be before Weekly, even though Weekly is tighter
+  assert.match(out, /Usage.*Weekly/);
+});
