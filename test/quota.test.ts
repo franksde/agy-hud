@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { formatResetCountdown, load, matchModel, usagePercent } from "../src/quota";
+import { formatResetCountdown, formatResetDuration, load, matchModel, usagePercent } from "../src/quota";
 
 test("load cache hit and model match", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-"));
@@ -56,4 +56,11 @@ test("format reset countdown", () => {
   for (const [input, want] of Object.entries(cases)) {
     assert.equal(formatResetCountdown(input, now), want);
   }
+});
+
+test("formatResetDuration formats properly", () => {
+  const now = new Date("2026-06-19T12:00:00Z");
+  assert.strictEqual(formatResetDuration("2026-06-19T14:15:00Z", now), "2h 15m");
+  assert.strictEqual(formatResetDuration("2026-06-24T14:00:00Z", now), "5d 2h");
+  assert.strictEqual(formatResetDuration("2026-06-19T11:00:00Z", now), "0m");
 });

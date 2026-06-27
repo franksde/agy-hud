@@ -12,6 +12,7 @@
 
 - 支持插件的 Antigravity CLI
 - `PATH` 中可用的 Node.js 18+
+- 安装并配置为终端字体的 [Nerd Font](https://www.nerdfonts.com/) (以正确渲染图标)
 
 `agy-hud` 以 Antigravity 插件归档包分发,不是 npm 包。归档包内已包含打包后的运行脚本 `dist/agy-hud.js`,所以插件用户不需要运行 `npm install`。
 
@@ -58,7 +59,7 @@ npm test
 
    向用户说明各部分的含义:模型与套餐档位、工作目录、git 分支、带 token 明细的上下文进度条(`context_value: both`)、连续的配额剩余进度条、本地重置时间,以及 agent 状态。默认配置使用更紧凑的 `percent` 上下文显示。图标需要 Nerd Font —— 没有时会显示成方框 —— HUD 在窄终端下也会平滑降级。
 
-2. 请用户确认效果,或询问是否需要调整 `multiline`、`show_icons`、`context_value` 或 `usage_value`(见[配置](#配置))。
+2. 请用户确认效果,或询问是否需要调整 `multiline`、`show_icons`、`context_value` 或 `usage_value`。请参考[配置示例](#配置示例)部分,向用户展示可用的备选样式。
 
 3. 用户确认后,下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压。
 
@@ -119,6 +120,59 @@ agy-hud quota refresh
 - `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。
 - `context_value`:`percent`、`tokens` 或 `both`。默认为 `percent`,即上下文显示当前输入侧窗口占用率。存在 token 总量时,百分比和进度条会由 `total_input_tokens / context_window_size` 计算,避免最近一次长输出让 HUD 跳动。
 - `usage_value`:`remaining` 或 `percent`。默认为 `remaining`,即配额文字和进度条都显示剩余量,例如 `Usage ███░░░░░ 40% left ↻ Reset 17:33`。
+
+### 配置示例
+
+**1. 单行显示** (`"multiline": false`)
+
+```json
+{
+  "multiline": false
+}
+```
+
+```text
+ 3.5 Flash High | Free  Ctx 13%  (130k/1M)  █░░░░░░░  Thinking
+```
+
+**2. 不显示图标** (`"show_icons": false`)
+
+```json
+{
+  "show_icons": false
+}
+```
+
+```text
+3.5 Flash High | Free │ project │ main
+Context █░░░░░░░ 13% │ Thinking
+```
+
+**3. 显示 Token 明细** (`"context_value": "both"`)
+
+```json
+{
+  "context_value": "both"
+}
+```
+
+```text
+ 3.5 Flash High | Free │  project │  main
+Context █░░░░░░░ 13% (130k/1M) │ Thinking
+```
+
+**4. 百分比显示使用量** (`"usage_value": "percent"`)
+
+```json
+{
+  "usage_value": "percent"
+}
+```
+
+```text
+ 󰊤 3.5 Flash High | Pro │ 󰉋 project │  main
+Context █░░░░░░░ 13% (130k/1M) │ Usage ██████░░ 60% ↻ Reset 17:33 │ Thinking
+```
 
 ## 配额缓存
 

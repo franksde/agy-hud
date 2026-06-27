@@ -56,3 +56,21 @@ test("load uses first existing path", () => {
 
   assert.equal(loadFromPaths([first, second]).showCWD, false);
 });
+
+test("load parses new quota layout and format options", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-"));
+  const configPath = path.join(dir, "config.json");
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({
+      quota_layout: "stacked",
+      reset_format: "duration",
+      show_plan_tier: false
+    }));
+    const config = loadFromPaths([configPath]);
+    assert.strictEqual(config.quotaLayout, "stacked");
+    assert.strictEqual(config.resetFormat, "duration");
+    assert.strictEqual(config.showPlanTier, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
