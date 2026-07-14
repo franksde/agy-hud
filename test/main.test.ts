@@ -204,15 +204,19 @@ test("renderStatusline fallbacks for empty and malformed input", () => {
   }
 });
 
+const packageVersion = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8")
+).version as string;
+
 test("CLI version prints package version and empty stdin prints agy-hud", () => {
   const entry = path.join(__dirname, "..", "src", "main.js");
-  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8" }), "0.1.6\n");
+  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8" }), `${packageVersion}\n`);
   assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8" }), "agy-hud\n");
 });
 
 test("dist bundle CLI smoke test", () => {
   const entry = path.join(__dirname, "..", "..", "dist", "agy-hud.js");
-  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8" }), "0.1.6\n");
+  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8" }), `${packageVersion}\n`);
   assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8" }), "agy-hud\n");
 });
 
