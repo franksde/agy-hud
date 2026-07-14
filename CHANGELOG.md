@@ -8,6 +8,12 @@
 - Fixed the subprocess tests writing state and lock files into the real home directory, where they could spawn a detached refresh or unlink a live lock.
 - Documented upgrading, which is not the same as installing: `agy plugin install` does not update `statusLine.command`, so a new version can sit unused while the CLI keeps running the old bundle without any error.
 - Fixed the local-path install instructions. Passing a git clone to `agy plugin install` copies the entire repository into the plugin directory, and fails outright when git's fsmonitor socket is present.
+- The cache directory is now created with mode `0700` and its files with `0600`. They carry a masked email, plan name, and conversation id, and previously inherited the default umask, leaving them readable by other local accounts.
+- Ignore a relative `XDG_CACHE_HOME`, as the XDG spec requires. It would otherwise put a separate cache, lock, and refresh probe inside every project directory the HUD rendered in.
+- A same-frame refresh that repairs a corrupt cache no longer also spawns a background refresh for damage it just fixed.
+- Release builds now verify that the git tag matches `package.json`, `plugin.json`, and the built bundle, and re-check that the committed `dist/` is current. A mistyped tag previously published a release whose archive reported a different version.
+- Documented that installing the plugin does not put an `agy-hud` command on `PATH`. The CLI examples now run the bundle with `node`.
+- Requirements now state Antigravity CLI 1.1.0+ explicitly, since dropping the `components` hook leaves no way to activate the HUD on a CLI without `/statusline`.
 
 ## 0.1.7
 

@@ -288,8 +288,10 @@ function defaultRuntime() {
     lsof: (pid) => (0, import_node_child_process.execFileSync)("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8" }),
     request: queryLanguageServer,
     now: () => /* @__PURE__ */ new Date(),
-    writeFile: (filePath, data) => import_node_fs3.default.writeFileSync(filePath, data, "utf8"),
-    mkdir: (dirPath) => import_node_fs3.default.mkdirSync(dirPath, { recursive: true })
+    // The cache carries a masked email, plan name, and per-model quota, so keep it private instead
+    // of leaving it world-readable under the default umask.
+    writeFile: (filePath, data) => import_node_fs3.default.writeFileSync(filePath, data, { encoding: "utf8", mode: 384 }),
+    mkdir: (dirPath) => import_node_fs3.default.mkdirSync(dirPath, { recursive: true, mode: 448 })
   };
 }
 async function queryLanguageServer(port, csrfToken) {
@@ -1003,7 +1005,7 @@ function quotaCacheWritePath() {
     return explicit;
   }
   const xdg = process.env.XDG_CACHE_HOME;
-  if (xdg) {
+  if (xdg && import_node_path4.default.isAbsolute(xdg)) {
     return import_node_path4.default.join(xdg, "agy-hud", "quota_cache.json");
   }
   const home = import_node_os.default.homedir();
@@ -1110,13 +1112,13 @@ async function runCli(args, deps = {}) {
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
-    const displayCache = await refreshQuotaBeforeRenderIfNeeded(
+    const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(
       cachePath,
       ok ? cache : null,
       payload,
       deps.refreshQuota ?? refreshQuota
     );
-    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable);
+    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed);
     stdout(`${renderStatusline(raw, cfg, displayCache)}
 `);
     return 0;
@@ -1170,24 +1172,24 @@ function readStdin(stdin) {
 }
 async function refreshQuotaBeforeRenderIfNeeded(cachePath, cache, payload, refresh) {
   if (!shouldRefreshBeforeRender(cachePath, payload, /* @__PURE__ */ new Date())) {
-    return cache;
+    return [cache, false];
   }
   try {
     const result = await refresh(cachePath);
     if (!result.ok) {
-      return cache;
+      return [cache, false];
     }
     const [freshCache, ok] = load(cachePath);
     if (!ok) {
-      return cache;
+      return [cache, false];
     }
     saveStatuslineRefreshState(
       refreshStatePath(cachePath),
       mergeStatuslineRefreshState(null, payload, true, /* @__PURE__ */ new Date())
     );
-    return freshCache;
+    return [freshCache, true];
   } catch {
-    return cache;
+    return [cache, false];
   }
 }
 function shouldRefreshBeforeRender(cachePath, payload, now) {
@@ -1301,9 +1303,9 @@ function saveStatuslineRefreshState(statePath, state2) {
     return;
   }
   try {
-    import_node_fs5.default.mkdirSync(import_node_path4.default.dirname(statePath), { recursive: true });
+    import_node_fs5.default.mkdirSync(import_node_path4.default.dirname(statePath), { recursive: true, mode: 448 });
     import_node_fs5.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
-`, "utf8");
+`, { encoding: "utf8", mode: 384 });
   } catch {
   }
 }

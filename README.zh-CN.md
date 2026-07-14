@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI。1.1.0 及以上版本使用 CLI 原生的 `/statusline` 命令来接入状态栏;旧版 `plugin.json` 里声明的 `components` hook 已不再被识别,因此必须显式指定 HUD(见下文)。
+- Antigravity CLI 1.1.0 或更高版本。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 
@@ -58,20 +58,38 @@ agy plugin install "$stage"
 
 ## 升级
 
-**装上新版本 ≠ 升级完成。** CLI 的 `statusLine.command` 指向的是某一个具体文件,而 `agy plugin install` 并不会去更新它。如果你的 command 仍然指向旧的那份 `dist/agy-hud.js`,那么跑的就还是旧版本:HUD 一切正常、没有任何报错,你只是没升级而已。先确认你实际在跑哪一份:
+**装上新版本 ≠ 升级完成。** CLI 的 `statusLine.command` 指向的是某一个具体文件,而 `agy plugin install` 并不会去更新它。如果你的 command 仍然指向旧的那份 `dist/agy-hud.js`,那么跑的就还是旧版本:HUD 一切正常、没有任何报错,你只是没升级而已。
+
+先确认你实际在跑哪一份:
 
 ```sh
-grep -A2 '"statusLine"' ~/.gemini/antigravity-cli/settings.json   # 接的是哪个文件
-agy-hud version                                                    # 或直接用 version 跑那个文件
+grep -A2 '"statusLine"' ~/.gemini/antigravity-cli/settings.json
 ```
 
-**如果你的 HUD 现在是正常的**,最省事的升级就是把 command 指向的那个文件覆盖掉。接线一个字都不用改,也不需要执行任何 slash command:
+command 只会是下面两种形态之一。无论哪种,**插件根目录都是路径里的那个 `agy-hud` 目录**——不是 command 里写的 `hooks` 目录,也不是 `dist`:
+
+```text
+/Users/you/.gemini/config/plugins/agy-hud/hooks/status-line.sh
+                                   ^^^^^^^ 插件根目录
+
+node /Users/you/.gemini/config/plugins/agy-hud/dist/agy-hud.js statusline
+                                       ^^^^^^^ 插件根目录
+```
+
+确认这个根目录当前是什么版本:
+
+```sh
+node <插件根目录>/dist/agy-hud.js version
+```
+
+**如果你的 HUD 现在是正常的**,最省事的升级就是覆盖这个根目录里的 bundle。接线一个字都不用改,也不需要执行任何 slash command:
 
 ```sh
 curl -fsSL -o agy-hud.tar.gz \
   https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
 tar -xzf agy-hud.tar.gz
-cp agy-hud/dist/agy-hud.js <你的-statusLine-command-指向的目录>/dist/agy-hud.js
+cp agy-hud/dist/agy-hud.js <插件根目录>/dist/agy-hud.js
+node <插件根目录>/dist/agy-hud.js version   # 确认已经报告新版本号
 ```
 
 **如果你的 HUD 在把 Antigravity CLI 升到 1.1.x 之后就消失了**,说明你之前依赖的是旧的 `components` hook,而新版 CLI 不再注册它。按上面的安装步骤装好新版,并用 `/statusline` 接一次线即可。这一步无法省略:插件没有任何 install hook 能替你写入状态栏配置——`components` 原本就是那个机制,而它已经没了。
@@ -111,11 +129,15 @@ GitHub release 会发布一个平台无关归档包:
 
 ## CLI
 
+安装插件**不会**在你的 `PATH` 上放一个 `agy-hud` 命令——归档包分发的是 bundle,不是 npm 包。请用 `node` 直接运行 bundle,路径取你的 `statusLine.command` 所指向的插件根目录(新版安装通常是 `~/.gemini/config/plugins/agy-hud`):
+
 ```sh
-agy-hud statusline < statusline_payload.json
-agy-hud version
-agy-hud quota refresh
+node <插件根目录>/dist/agy-hud.js statusline < statusline_payload.json
+node <插件根目录>/dist/agy-hud.js version
+node <插件根目录>/dist/agy-hud.js quota refresh
 ```
+
+下文为了简洁,用 `agy-hud` 指代上面这条命令。如果你经常用,可以自己配一个 alias。
 
 `statusline` 从标准输入以及本地配置/缓存文件渲染。当 `agent_state` 从 active work 回到 `idle` 时,它会先做一次本地 loopback `quota refresh` 再渲染,让同一次 redraw 就能反映本轮回答后的配额。缺失或过期缓存仍会用后台刷新作为兜底。`quota refresh` 会向正在运行的 Antigravity 本地服务请求 `GetUserStatus`,写入脱敏后的配额缓存;如果找不到可用的本地服务,会以非零状态退出。
 
@@ -178,7 +200,7 @@ Antigravity CLI 1.1.0 之后已被官方弃用。升级无需任何操作:新缓
 Antigravity 运行时,可以手动刷新这份回退缓存:
 
 ```sh
-agy-hud quota refresh
+node <插件根目录>/dist/agy-hud.js quota refresh
 ```
 
 刷新命令兼容两种已知的 Antigravity 本地服务形态:当前的 `agy` loopback 服务,以及旧版 `language_server --csrf_token ...` 进程,按这个顺序尝试。如果存在 CSRF token,它只会被用于 loopback `GetUserStatus` 请求。命令最终只保存下面这种脱敏缓存。正常的 `statusline` 渲染会读取该缓存,并在 active work 结束时刷新;同时保留过期缓存刷新作为兜底。如果缓存仍然看起来完全未消耗(所有模型都是 `100% left`),新的会话或 agent 状态变化也会触发一次带去抖的即时后台刷新。

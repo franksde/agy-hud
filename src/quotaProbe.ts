@@ -173,8 +173,11 @@ function defaultRuntime(): ProbeRuntime {
     lsof: (pid: string) => execFileSync("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8" }),
     request: queryLanguageServer,
     now: () => new Date(),
-    writeFile: (filePath: string, data: string) => fs.writeFileSync(filePath, data, "utf8"),
-    mkdir: (dirPath: string) => fs.mkdirSync(dirPath, { recursive: true })
+    // The cache carries a masked email, plan name, and per-model quota, so keep it private instead
+    // of leaving it world-readable under the default umask.
+    writeFile: (filePath: string, data: string) =>
+      fs.writeFileSync(filePath, data, { encoding: "utf8", mode: 0o600 }),
+    mkdir: (dirPath: string) => fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 })
   };
 }
 

@@ -347,6 +347,48 @@ test("the post-refresh state is rebuilt from the payload and never inherits lega
   );
 });
 
+test("the cache directory and state file are not world-readable", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 60_000);
+
+  await runStatuslineInHome(fixture, statuslinePayload());
+
+  const dirMode = fs.statSync(path.dirname(fixture.writePath)).mode & 0o777;
+  const stateMode = fs.statSync(`${fixture.writePath}.statusline.json`).mode & 0o777;
+  assert.equal(dirMode, 0o700, "the cache dir holds quota and conversation state, so it must be private");
+  assert.equal(stateMode, 0o600, "the state file records the conversation id and agent state");
+});
+
+test("a same-frame repair does not also spawn a background refresh", async () => {
+  const fixture = homeFixture();
+  fs.mkdirSync(path.dirname(fixture.writePath), { recursive: true });
+  fs.writeFileSync(fixture.writePath, "{ truncated", "utf8");
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+  writeRefreshState(fixture.legacyPath, "working", 60_000);
+  const seen: string[] = [];
+
+  await runInHome(fixture, async () => {
+    await runCli(["statusline"], {
+      stdin: Readable.from([statuslinePayload("idle")]),
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        seen.push(cachePath);
+        writeCache(cachePath, 0.1, 0);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+  });
+
+  assert.deepEqual(seen, [fixture.writePath], "the same-frame refresh already rewrote the corrupt cache");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(
+    fs.existsSync(fixture.markerPath),
+    false,
+    "the repair was already done in-frame, so no second probe should be spawned"
+  );
+});
+
 test("quota refresh targets the write path and leaves a legacy lock alone", async () => {
   const fixture = homeFixture();
   fs.mkdirSync(path.dirname(fixture.legacyPath), { recursive: true });
@@ -584,6 +626,14 @@ test("AGY_HUD_QUOTA_CACHE overrides the write path and is the only read candidat
   withEnv({ AGY_HUD_QUOTA_CACHE: "/tmp/explicit/quota_cache.json", XDG_CACHE_HOME: undefined, HOME: "/tmp/home" }, () => {
     assert.equal(quotaCacheWritePath(), "/tmp/explicit/quota_cache.json");
     assert.deepEqual(quotaCacheReadCandidates(), ["/tmp/explicit/quota_cache.json"]);
+  });
+});
+
+test("a relative XDG_CACHE_HOME is ignored, per the XDG spec", () => {
+  // A relative value would make the cache follow the working directory: one cache, lock, and probe
+  // per project, written into whatever tree the CLI happens to be rendering in.
+  withEnv({ AGY_HUD_QUOTA_CACHE: undefined, XDG_CACHE_HOME: ".cache", HOME: "/tmp/home" }, () => {
+    assert.equal(quotaCacheWritePath(), path.join("/tmp/home", ".cache", "agy-hud", "quota_cache.json"));
   });
 });
 

@@ -8,7 +8,7 @@ This repository is the TypeScript source for the `agy-hud` Antigravity CLI statu
 - Keep edits narrowly scoped to the requested change.
 - Do not commit local runtime data, probe output, caches, secrets, or agent scratch files.
 - Use `git pull --rebase` when synchronizing with a remote. Do not create merge commits.
-- Prefer conventional commit messages, for example `fix(hud): render quota as discrete cells`.
+- Prefer conventional commit messages, for example `fix(hud): prefer the current worktree branch`.
 
 ## Development Workflow
 
@@ -36,9 +36,15 @@ Sync the bundle to the file the CLI actually runs, which is whatever `statusLine
 
 ```sh
 npm test
-grep -A2 '"statusLine"' "$HOME/.gemini/antigravity-cli/settings.json"   # find the wired-up file
-cp dist/agy-hud.js <that-directory>/dist/agy-hud.js
-node <that-directory>/dist/agy-hud.js statusline < testdata/statusline_payload.json
+grep -A2 '"statusLine"' "$HOME/.gemini/antigravity-cli/settings.json"
+```
+
+The command points either at `<plugin-root>/hooks/status-line.sh` or at `<plugin-root>/dist/agy-hud.js`. The plugin root is the `agy-hud` directory in that path, not `hooks/` and not `dist/`. Sync the bundle into that root:
+
+```sh
+cp dist/agy-hud.js <plugin-root>/dist/agy-hud.js
+node <plugin-root>/dist/agy-hud.js version    # must report the version you just built
+node <plugin-root>/dist/agy-hud.js statusline < testdata/statusline_payload.json
 ```
 
 `agy plugin install` places plugins under `$HOME/.gemini/config/plugins`, but it does NOT update `statusLine.command`. A user who installed before the Antigravity CLI 1.1.0 config migration can still be wired to `$HOME/.gemini/antigravity-cli/plugins/agy-hud`, so installing a new version there changes nothing and the CLI keeps running the old bundle without any error.
@@ -53,8 +59,8 @@ If the live CLI still shows old output, first check that this installed bundle w
 - Quota probing must contact only Antigravity loopback services and must write sanitized cache data.
 - The quota cache path defaults to `$XDG_CACHE_HOME/agy-hud/quota_cache.json`, falling back to `$HOME/.cache/agy-hud/quota_cache.json`. Writes always go there. Reads fall back to the pre-0.1.8 path under `$HOME/.gemini/antigravity-cli/scratch/agy-hud/` when no new cache exists yet, so upgrades are seamless.
 - Quota reset comes from the local API `quotaInfo.resetTime`. Display it as an absolute local clock time, not as a live countdown, because a status-line hook cannot update already-rendered text without a redraw.
-- The quota bar represents 20% steps from the official quota data. Render it as five discrete cells, not as a continuous progress bar.
-- The context bar is different: it is based on a precise context percentage and may remain continuous.
+- The quota bar is a continuous progress bar derived from the exact quota fraction, 8 cells for a single window and 10 per window when both are shown (`usageBar` in `src/statusline.ts`). It is not five discrete 20% cells; an earlier revision of this file said otherwise, and that never matched the code, the tests, or the READMEs.
+- The context bar is likewise continuous, based on a precise context percentage.
 
 ## Release And CI
 

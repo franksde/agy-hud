@@ -21,6 +21,21 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - run: git diff --exit-code dist/
+      - name: Verify the tag matches every version source
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          plugin=$(node -p "require('./plugin.json').version")
+          bundle=$(node dist/agy-hud.js version)
+          echo "tag=$tag package.json=$pkg plugin.json=$plugin bundle=$bundle"
+          for found in "$pkg" "$plugin" "$bundle"; do
+            if [ "$found" != "$tag" ]; then
+              echo "::error::tag v$tag does not match $found; refusing to publish a mislabeled release"
+              exit 1
+            fi
+          done
       - name: Build archive
         run: |
           package="agy-hud"

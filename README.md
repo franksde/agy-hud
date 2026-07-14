@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI. On 1.1.0 and newer the status line is wired with the CLI's native `/statusline` command; the `components` hook that older `plugin.json` files declared is no longer honored, so the HUD must be pointed at explicitly (see below).
+- Antigravity CLI 1.1.0 or newer. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 
@@ -58,20 +58,38 @@ A local install lands in the same plugin directory as a release install, so the 
 
 ## Upgrading
 
-**Installing a new version is not the same as upgrading.** The CLI's `statusLine.command` points at a specific file, and `agy plugin install` does not update it. If your command still points at an older copy of `dist/agy-hud.js`, that older copy keeps running: the HUD looks fine, nothing errors, and you are simply not on the new version. Check what you are actually running:
+**Installing a new version is not the same as upgrading.** The CLI's `statusLine.command` points at a specific file, and `agy plugin install` does not update it. If your command still points at an older copy of `dist/agy-hud.js`, that older copy keeps running: the HUD looks fine, nothing errors, and you are simply not on the new version.
+
+Start by finding out what you are actually running:
 
 ```sh
-grep -A2 '"statusLine"' ~/.gemini/antigravity-cli/settings.json   # which file is wired up
-agy-hud version                                                    # or run that file with: version
+grep -A2 '"statusLine"' ~/.gemini/antigravity-cli/settings.json
 ```
 
-**If the HUD is currently working**, the smallest upgrade is to overwrite the file your command already points at. Nothing else changes, and no slash command is needed:
+The command is one of these two shapes. Either way, **the plugin root is the `agy-hud` directory in that path** — not the `hooks` directory the command names, and not `dist`:
+
+```text
+/Users/you/.gemini/config/plugins/agy-hud/hooks/status-line.sh
+                                   ^^^^^^^ plugin root
+
+node /Users/you/.gemini/config/plugins/agy-hud/dist/agy-hud.js statusline
+                                       ^^^^^^^ plugin root
+```
+
+Confirm the version that root is on:
+
+```sh
+node <plugin-root>/dist/agy-hud.js version
+```
+
+**If the HUD is currently working**, the smallest upgrade is to overwrite the bundle inside that root. The wiring does not change and no slash command is needed:
 
 ```sh
 curl -fsSL -o agy-hud.tar.gz \
   https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
 tar -xzf agy-hud.tar.gz
-cp agy-hud/dist/agy-hud.js <the-directory-your-statusLine-command-points-at>/dist/agy-hud.js
+cp agy-hud/dist/agy-hud.js <plugin-root>/dist/agy-hud.js
+node <plugin-root>/dist/agy-hud.js version   # confirm it now reports the new version
 ```
 
 **If your HUD disappeared after updating the Antigravity CLI to 1.1.x**, you were relying on the old `components` hook, which the CLI no longer registers. Install the new version normally and wire it up once with `/statusline`, as in the install sections above. This step is unavoidable: a plugin has no install hook that can write the status-line setting for you — `components` *was* that mechanism, and it is gone.
@@ -111,11 +129,15 @@ The archive should contain `plugin.json`, `hooks/status-line.sh`, `dist/agy-hud.
 
 ## CLI
 
+Installing the plugin does **not** put an `agy-hud` command on your `PATH` — the archive ships a bundle, not an npm package. Run the bundle with `node`, using the plugin root that your `statusLine.command` points into (`~/.gemini/config/plugins/agy-hud` for a current install):
+
 ```sh
-agy-hud statusline < statusline_payload.json
-agy-hud version
-agy-hud quota refresh
+node <plugin-root>/dist/agy-hud.js statusline < statusline_payload.json
+node <plugin-root>/dist/agy-hud.js version
+node <plugin-root>/dist/agy-hud.js quota refresh
 ```
+
+The examples below use `agy-hud` as shorthand for that. If you use these often, alias it.
 
 `statusline` renders from stdin plus local config/cache files. When `agent_state` settles from active work back to `idle`, it performs one local loopback `quota refresh` before rendering so the same redraw can reflect post-response quota. Missing or stale cache data can still refresh in the background as a fallback. `quota refresh` asks the running Antigravity local server for `GetUserStatus`, writes the sanitized quota cache, and exits non-zero if no local server can be reached.
 
@@ -180,7 +202,7 @@ from the old cache and forces a refresh to rewrite the damaged file, rather than
 Refresh the fallback cache manually when Antigravity is running:
 
 ```sh
-agy-hud quota refresh
+node <plugin-root>/dist/agy-hud.js quota refresh
 ```
 
 The refresh command supports both known Antigravity local-server shapes: the current `agy` loopback server and the older `language_server --csrf_token ...` process, in that order. If a CSRF token is present, it is used only for the loopback `GetUserStatus` request. The command stores only the sanitized cache shape below. Normal `statusline` rendering reads this cache and refreshes it when active work settles. It also uses stale-cache refreshes as a fallback. If the cache still looks untouched (`100% left` for every model), status-line activity such as a new conversation or agent state change can trigger an immediate debounced background refresh.

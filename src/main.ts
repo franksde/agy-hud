@@ -78,8 +78,11 @@ export function quotaCacheWritePath(): string {
   if (explicit) {
     return explicit;
   }
+  // The XDG spec requires an absolute path and says to ignore the variable otherwise. A relative
+  // value would make the cache follow the working directory, giving every project its own cache,
+  // lock, and probe.
   const xdg = process.env.XDG_CACHE_HOME;
-  if (xdg) {
+  if (xdg && path.isAbsolute(xdg)) {
     return path.join(xdg, "agy-hud", "quota_cache.json");
   }
   const home = os.homedir();
@@ -215,13 +218,15 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
-    const displayCache = await refreshQuotaBeforeRenderIfNeeded(
+    const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(
       cachePath,
       ok ? cache : null,
       payload,
       deps.refreshQuota ?? refreshQuota
     );
-    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable);
+    // A same-frame refresh already rewrote the write path, so a corrupt primary is repaired by now.
+    // Passing the stale flag on would spawn a second probe for damage that no longer exists.
+    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed);
     stdout(`${renderStatusline(raw, cfg, displayCache)}\n`);
     return 0;
   }
@@ -280,18 +285,18 @@ async function refreshQuotaBeforeRenderIfNeeded(
   cache: Cache | null,
   payload: Payload | null,
   refresh: (cachePath: string) => Promise<RefreshResult>
-): Promise<Cache | null> {
+): Promise<[Cache | null, boolean]> {
   if (!shouldRefreshBeforeRender(cachePath, payload, new Date())) {
-    return cache;
+    return [cache, false];
   }
   try {
     const result = await refresh(cachePath);
     if (!result.ok) {
-      return cache;
+      return [cache, false];
     }
     const [freshCache, ok] = loadQuota(cachePath);
     if (!ok) {
-      return cache;
+      return [cache, false];
     }
     // No previous state is read here: payload is non-null and activityRefresh is true, so the merge
     // overwrites every field. Reading a companion first would be dead work, and giving it a legacy
@@ -300,9 +305,9 @@ async function refreshQuotaBeforeRenderIfNeeded(
       refreshStatePath(cachePath),
       mergeStatuslineRefreshState(null, payload, true, new Date())
     );
-    return freshCache;
+    return [freshCache, true];
   } catch {
-    return cache;
+    return [cache, false];
   }
 }
 
@@ -437,8 +442,10 @@ function saveStatuslineRefreshState(statePath: string, state: StatuslineRefreshS
     return;
   }
   try {
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    // The cache dir holds quota data and this file records the conversation id and agent state, so
+    // keep both private rather than leaving them world-readable under the default umask.
+    fs.mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   } catch {
     // ignore
   }
