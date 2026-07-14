@@ -62,6 +62,37 @@ If the live CLI still shows old output, first check that this installed bundle w
 - The quota bar is a continuous progress bar derived from the exact quota fraction, 8 cells for a single window and 10 per window when both are shown (`usageBar` in `src/statusline.ts`). It is not five discrete 20% cells; an earlier revision of this file said otherwise, and that never matched the code, the tests, or the READMEs.
 - The context bar is likewise continuous, based on a precise context percentage.
 
+## Do Not "Optimize Away" The Quota Probe
+
+On CLI 1.0.8+ the payload carries official quota and the HUD renders from it, so the background probe
+looks like pure waste: it spawns a process to write a cache that, seemingly, nothing reads. It is not
+waste. **The two quota sources lag in opposite windows, and they cover for each other:**
+
+- Right after a turn settles from working to idle, the **official payload is behind**. The probe is
+  ahead. `test/main.test.ts` pins this: official reports `29% left` while the probe returns
+  `3% left`, and the HUD must render 3%. This is what 0.1.6's same-frame refresh exists for.
+- After an idle stretch, the **loopback API is behind**. The payload is ahead. Measured on CLI 1.1.2:
+  loopback still said `remainingFraction: 1` for every model while the payload already reported
+  `gemini-5h: 0.9826359`; the loopback caught up about ten minutes later.
+
+`mergeFreshCacheQuota` (`src/statusline.ts`) is what reconciles the first case, and it needs a cache
+younger than five minutes to do it — which is exactly what the background refresh maintains. Suppress
+the probe and that correction silently dies.
+
+Two further traps, if you are tempted anyway. `mergeFreshCacheQuota` only corrects the **5h** window,
+never weekly, so "some bucket shows consumption" is not a safe signal that official quota is healthy.
+And the cache is **shared across all models** with one timestamp (`buildQuotaCache` in
+`src/quotaProbe.ts`), so gating refreshes on the *current* model's quota lets the whole cache age out
+and breaks the next model switch.
+
+Also note that `statusline` only runs when the CLI redraws. There is no such thing as a refresh
+during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
+quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
+
+If probe cost is the real concern, make each probe cheaper rather than rarer: it currently runs
+`ps aux` and `lsof` to rediscover the loopback port on every call, and that port is stable for the
+CLI's lifetime.
+
 ## Release And CI
 
 - CI expects `npm test` to pass.
