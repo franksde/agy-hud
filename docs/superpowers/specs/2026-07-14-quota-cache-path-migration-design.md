@@ -1,7 +1,7 @@
 # Quota Cache Path Migration Design
 
 **Date**: 2026-07-14
-**Status**: Approved (revised after Codex spec review)
+**Status**: Approved (revised after two Codex spec-review rounds)
 **Target version**: 0.1.8
 
 ## Problem
@@ -25,28 +25,31 @@ moved once.
 
 - Move the quota cache out of the CLI's directory tree entirely, so a future official reorganization
   cannot strand it again.
-- Upgrade must be seamless for existing users: no visible HUD regression on the first render after
-  upgrading, not even a single frame missing the usage segment, and no missed quota refresh.
+- Upgrade must be seamless for existing users: no frame missing the usage segment, and no missed
+  quota refresh.
+- Introduce no failure mode that does not already exist with a single cache path.
 - Add no migration write (no rename, copy, or delete) to the `statusline` render path.
 
 ## Non-Goals
 
 - Migrating or deleting the old cache file on disk. It is left in place deliberately (see
   "Downgrade safety").
-- Making the quota cache write atomic. `quotaProbe` currently writes with a plain `writeFileSync`
-  (`src/quotaProbe.ts:160`), so a concurrent reader can observe a truncated file and a crash can
-  leave a corrupt one. This is a pre-existing defect that exists identically today with a single
-  cache path. The read fallback below limits its blast radius, but fixing the write itself is out of
-  scope for this change.
+- Making the cache and state writes atomic. Both use a plain `writeFileSync`
+  (`src/quotaProbe.ts:160`, `src/main.ts:378`), so a concurrent reader can observe a truncated file
+  and a crash can leave a corrupt one. This is a pre-existing defect. It is out of scope, but the
+  read-fallback design below must not *amplify* it — see "Corruption handling", which is what makes
+  declining the atomic write safe.
 - Changing the cache file format, the quota probe, or any rendering behavior.
 
-## Correcting a Prior Claim
+## Correcting Two Prior Claims
 
-An earlier draft of this spec listed "keep the statusline hot path read-only" as a goal, citing
-`AGENTS.md`. That was wrong. The `statusline` path already writes: it persists the refresh-debounce
-state (`src/main.ts:293`) and the background-refresh lock (`src/main.ts:308`). The real constraint in
-`AGENTS.md` is that `statusline` must stay *fast*. The goal above is restated accordingly: we add no
-*migration* write, and we leave the existing state and lock writes exactly as they are.
+An earlier draft listed "keep the statusline hot path read-only" as a goal, citing `AGENTS.md`. That
+was wrong: `statusline` already writes the refresh-debounce state (`src/main.ts:293`) and the
+background-refresh lock (`src/main.ts:308`). The real constraint is that `statusline` must stay
+*fast*. The goal is restated as adding no *migration* write.
+
+An earlier draft also claimed the legacy cache "cannot be newer" than the new cache. That is false;
+see "Downgrade safety" for the reachable sequence and the accepted cost.
 
 ## Decisions
 
@@ -60,11 +63,6 @@ the legacy path; writes always go to the new path. This makes the upgrade seamle
 files. An atomic rename on first run would produce a cleaner disk, but it adds rename-failure,
 concurrency, and companion-file handling to the render path for no user-visible benefit, and it
 forfeits the downgrade safety described below.
-
-**Fallback keys on a successful load, not on file existence.** A path is only "chosen" if
-`loadQuota` actually parses a cache from it. Keying on `existsSync` would let an empty, truncated, or
-corrupt new cache permanently mask a perfectly good legacy one, which contradicts the
-no-missing-frame goal given the non-atomic write noted above.
 
 ## Architecture
 
@@ -96,36 +94,76 @@ Where:
 LEGACY_QUOTA_CACHE_PATH = $HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json
 ```
 
-Consumers walk the list in order and take the first candidate that loads successfully. Two readers
-use it:
+The first candidate is the *primary*. Consumers walk the list in order. Writes never fall back.
 
-- the quota cache itself, via `loadQuota`;
-- the refresh-debounce state, via `loadStatuslineRefreshState` on each candidate's
-  `.statusline.json` companion.
+## Corruption Handling
 
-The debounce state must fall back too. `shouldRefreshBeforeRender` (`src/main.ts:268`) keys the
-same-frame refresh on the *previous* `agentState`. If the state file did not fall back, then an
-upgrade landing exactly on a working-to-idle transition would see no previous state, skip the
-same-frame refresh, and also fail the staleness and activity checks (the legacy cache is fresh and
-already-consumed). The quota would silently not refresh that turn. Falling back on read costs one
-extra `readFileSync` attempt and removes the case entirely.
+The cache and the debounce state fall back under *different* rules. The asymmetry is deliberate,
+because the two failure modes have opposite consequences.
 
-Writes never fall back: the new cache, its lock, and its debounce state always go to the write path.
+### Quota cache: fall back on any load failure, but repair the primary
+
+The cache falls back whenever a candidate fails to load, corrupt or absent, because falling back
+means "render slightly older but valid quota", which is safe.
+
+That alone would introduce a new failure mode, however. Consider: the primary cache is truncated by
+an interrupted write, while a fresh legacy cache still sits within its TTL. The render falls back to
+the legacy cache, `quotaCacheNeedsRefresh` inspects *that* cache, finds it fresh, and schedules no
+refresh. The corrupt primary is never rewritten, and it stays masked until the legacy cache ages out
+— indefinitely, if an old build keeps refreshing the legacy path. With a single cache path this
+cannot happen: the load fails, the cache is `null`, and a refresh fires immediately.
+
+So the loader must distinguish *absent* from *present-but-unloadable*. If the primary exists and
+fails to load, that is a **repair condition**: a background refresh is forced regardless of the
+freshness of whatever cache was actually rendered, which rewrites the primary. This reuses the
+existing escape hatch in `triggerBackgroundRefreshIfNeeded`, where `activityRefresh` already forces
+a refresh past the `quotaCacheNeedsRefresh` check (`src/main.ts:295`). The repair takes the normal
+30-second lock window, not the 5-second activity window, so a persistently failing refresh retries
+at the same cadence as any stale cache today.
+
+### Debounce state: fall back only when the primary is absent
+
+The state file must *not* fall back on a corrupt primary. Falling back here does not mean "render
+older data", it means *resurrecting a stale `agentState`*, which has a side effect:
+`shouldRefreshBeforeRender` (`src/main.ts:268`) would read a stale `working`, compare it against a
+current `idle` payload, and fire a same-frame refresh — and unlike the background path, the
+same-frame refresh takes no lock. Concurrent renders that all fail to read a primary state file
+mid-write would each resurrect the legacy `working` state and each launch a probe, which would then
+race to overwrite the primary cache and feed straight back into the corruption above.
+
+Single-path behavior is to read `null` on any failure and skip the same-frame refresh. We preserve
+exactly that: the state falls back to the legacy companion **only when the primary companion does
+not exist**. A primary that exists but fails to parse yields `null`, same as today.
+
+Why the state must fall back at all when absent: `shouldRefreshBeforeRender` keys the same-frame
+refresh on the *previous* `agentState`. Without the fallback, an upgrade landing exactly on a
+working-to-idle transition sees no previous state, skips the same-frame refresh, and also fails the
+staleness and activity checks, because the legacy cache is fresh and already-consumed. The quota
+silently would not refresh that turn.
 
 ## Data Flow
 
 In the `statusline` command (`src/main.ts:174-189`):
 
-- The initial `loadQuota` walks the read candidates and takes the first that parses.
+- The initial cache load walks the read candidates and takes the first that parses, recording whether
+  the primary was present-but-unloadable (the repair condition above).
 - Everything write-side uses the write path: `refreshQuotaBeforeRenderIfNeeded`, the background
   refresh trigger, the `.lock` file, and the `.statusline.json` debounce state.
-- Reading the debounce state walks the candidates' `.statusline.json` companions; writing it targets
-  the write path only.
 - After a refresh completes, the cache is re-read from the write path, because fresh data is
   necessarily there.
 
-In the `quota refresh` command (`src/main.ts:191-213`), the cache path and its `.lock` companion both
-resolve to the write path, so a stale legacy lock is never touched.
+`loadStatuslineRefreshState` has three call sites, and they do not all get the fallback:
+
+| Call site | Read strategy |
+|---|---|
+| `shouldRefreshBeforeRender` (`src/main.ts:272`) | Fallback (absent-primary only) |
+| `triggerBackgroundRefreshIfNeeded` (`src/main.ts:290`) | Fallback (absent-primary only) |
+| Post-refresh merge in `refreshQuotaBeforeRenderIfNeeded` (`src/main.ts:260`) | **Write path only** |
+
+The third is a deliberate exception. It is the read half of a read-modify-write whose write always
+targets the write path, and it runs *after* a successful refresh, at which point the write path is
+authoritative. Reading a legacy companion there would merge stale fields into a file we are about to
+overwrite. It gets no fallback, and a test pins this.
 
 ### Directory creation ordering
 
@@ -150,15 +188,21 @@ and the HUD omits the usage segment rather than showing a fake limit.
 Because the legacy file is never moved or deleted, a user who reverts to 0.1.7 or earlier still has a
 working cache: the old build reads the old path, finds the file, and proceeds.
 
-The sharp edge: a downgrade that then runs a refresh writes *fresh* data to the legacy path while a
-*stale* cache sits at the new path. On re-upgrade, the new path loads successfully and therefore
-wins, so the HUD renders the older data. Pointing `AGY_HUD_QUOTA_CACHE` at the legacy path for one
-refresh and then unsetting it produces the same state.
+The sharp edge: a downgrade that then runs a refresh writes *fresh* data to the legacy path while an
+older cache sits at the new path. On re-upgrade the primary loads successfully and therefore wins, so
+the HUD renders the older data. Pointing `AGY_HUD_QUOTA_CACHE` at the legacy path for one refresh and
+then unsetting it produces the same state.
 
-We accept this. Timestamps are deliberately not compared: doing so would mean reading and parsing
-both files on every render to defend against a downgrade-refresh-upgrade sequence, and the failure
-is self-healing — the stale new cache trips `quotaCacheNeedsRefresh`, a background refresh fires, and
-the next render is correct. The cost is at most one render of older-but-valid quota data.
+We accept this, and the cost is larger than an earlier draft claimed. It is **not** one frame. If the
+primary cache is still inside its TTL — 15 seconds when consumed, 30 seconds when untouched
+(`src/main.ts:13-14`) — then `quotaCacheNeedsRefresh` returns `false` and *every* render in that
+window shows the older data, plus the round trip of the background refresh that eventually fires.
+Seconds, not frames.
+
+Timestamps are deliberately not compared: doing so would mean reading and parsing both candidates on
+every render to defend against a sequence that requires a manual downgrade or a manual env override,
+and that self-heals within seconds. If a one-frame bound were ever required, comparing candidate
+timestamps would be the way to get it.
 
 The standing cost of this approach is one orphaned file of a few KB per user, which is never cleaned
 up. Accepted.
@@ -174,12 +218,12 @@ Path resolution:
 3. `AGY_HUD_QUOTA_CACHE` overrides the write path, and makes the read candidates exactly that one path.
 4. `quotaCacheReadCandidates` lists the new path before the legacy path, and de-duplicates.
 
-Read fallback:
+Cache read fallback:
 
 5. Only a legacy cache exists: it is loaded and the usage segment renders (the seamless-upgrade case).
-6. Both caches exist and both parse: the new one wins.
-7. The new cache exists but is corrupt, and a valid legacy cache exists: the legacy one is used and
-   the usage segment still renders.
+6. Both caches exist and both parse: the primary wins.
+7. Primary corrupt, legacy valid: the legacy cache renders, **and** a repair refresh is forced even
+   though the rendered legacy cache is fresh.
 8. Neither exists: no crash, no usage segment.
 
 Write-side routing (these are what stop a partial implementation from passing):
@@ -188,12 +232,22 @@ Write-side routing (these are what stop a partial implementation from passing):
 10. With only a legacy cache present, the background refresh writes `.lock` and `.statusline.json`
     under the new path only, leaving the legacy companions untouched.
 11. `quota refresh` cleans up only the new lock and never unlinks a legacy lock.
-12. The first background refresh succeeds when the new cache directory does not exist yet.
+12. `quota refresh` passes `quotaCacheWritePath()` to the injected refresh callback. (Without this,
+    an implementation could migrate the lock cleanup correctly and still write the cache to the old
+    path.)
+13. The first background refresh succeeds when the new cache directory does not exist yet.
 
-Debounce-state fallback:
+Debounce-state semantics:
 
-13. Upgrade on a working-to-idle transition with only a legacy debounce state present still performs
-    the same-frame refresh (the missed-refresh case that motivates the state fallback).
+14. Upgrade on a working-to-idle transition with only a legacy state present still performs the
+    same-frame refresh (the missed-refresh case that motivates the state fallback).
+15. A *corrupt* primary state file with a legacy `working` state present does **not** resurrect the
+    legacy state: no same-frame refresh fires.
+16. `triggerBackgroundRefreshIfNeeded` reads the state through the fallback independently of
+    `shouldRefreshBeforeRender`. Pin it with a recent legacy `working` state that suppresses the
+    same-frame refresh, and assert the background trigger still sees the fallback state.
+17. The post-refresh state merge reads the write path only, and does not merge fields from a legacy
+    companion.
 
 Test hygiene, corrected from the prior draft: it is *not* true that all existing tests inject
 `AGY_HUD_QUOTA_CACHE`. The two subprocess smoke tests (`test/main.test.ts:207`, `:213`) and the
