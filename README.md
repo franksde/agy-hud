@@ -133,10 +133,17 @@ Display options:
 On Antigravity CLI 1.0.8 and newer, `agy-hud` reads the official `quota` object from the status-line payload first. If the payload includes both 5-hour and weekly windows, the HUD renders both in order instead of collapsing them into one ambiguous number. If an official bucket still looks untouched while a fresh active-model cache already shows consumption, `agy-hud` uses the fresh cache to avoid showing a stale `100% left`. Older CLI versions, or payloads without official quota data, fall back to the local quota cache. The default cache path is:
 
 ```text
-$HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json
+$XDG_CACHE_HOME/agy-hud/quota_cache.json
+$HOME/.cache/agy-hud/quota_cache.json   # when XDG_CACHE_HOME is unset
 ```
 
-You can override it with `AGY_HUD_QUOTA_CACHE`.
+You can override it with `AGY_HUD_QUOTA_CACHE`, which then becomes the only path used for both reads
+and writes.
+
+Before 0.1.8 the cache lived at `$HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json`,
+inside a directory the Antigravity CLI abandoned in 1.1.0. Upgrading needs no action: the HUD still
+reads that old file when no new cache exists yet, and the first refresh writes the new one. The old
+file is left in place, so downgrading keeps working too.
 
 Refresh the fallback cache manually when Antigravity is running:
 

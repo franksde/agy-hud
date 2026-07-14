@@ -133,10 +133,15 @@ agy-hud quota refresh
 在 Antigravity CLI 1.0.8 及更新版本中,`agy-hud` 会优先读取 status-line payload 里的官方 `quota` 对象。如果 payload 同时包含 5 小时和周两个窗口,HUD 会按顺序分别显示,不再折叠成一个容易误解的数字。如果这个官方 bucket 仍然看起来完全未消耗,但新鲜的 active-model 缓存已经显示有消耗,`agy-hud` 会使用新鲜缓存,避免显示过期的 `100% left`。旧版 CLI 或没有官方配额数据的 payload,会回退到本地配额缓存。默认缓存路径为:
 
 ```text
-$HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json
+$XDG_CACHE_HOME/agy-hud/quota_cache.json
+$HOME/.cache/agy-hud/quota_cache.json   # 未设置 XDG_CACHE_HOME 时
 ```
 
-你可以用 `AGY_HUD_QUOTA_CACHE` 覆盖该路径。
+你可以用 `AGY_HUD_QUOTA_CACHE` 覆盖该路径,覆盖后读写都只使用这一个路径。
+
+0.1.8 之前,缓存位于 `$HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json`,而那个目录在
+Antigravity CLI 1.1.0 之后已被官方弃用。升级无需任何操作:新缓存还不存在时,HUD 仍会读取旧文件,
+第一次刷新就会写出新缓存。旧文件会原样保留,所以降级回旧版本同样可以正常工作。
 
 Antigravity 运行时,可以手动刷新这份回退缓存:
 

@@ -46,7 +46,7 @@ If the live CLI still shows old output, first check that this installed bundle w
 
 - `statusline` must stay fast. It should only read stdin, local config, local cache, and cheap local git metadata.
 - Quota probing must contact only Antigravity loopback services and must write sanitized cache data.
-- The quota cache path defaults to `$HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json`.
+- The quota cache path defaults to `$XDG_CACHE_HOME/agy-hud/quota_cache.json`, falling back to `$HOME/.cache/agy-hud/quota_cache.json`. Writes always go there. Reads fall back to the pre-0.1.8 path under `$HOME/.gemini/antigravity-cli/scratch/agy-hud/` when no new cache exists yet, so upgrades are seamless.
 - Quota reset comes from the local API `quotaInfo.resetTime`. Display it as an absolute local clock time, not as a live countdown, because a status-line hook cannot update already-rendered text without a redraw.
 - The quota bar represents 20% steps from the official quota data. Render it as five discrete cells, not as a continuous progress bar.
 - The context bar is different: it is based on a precise context percentage and may remain continuous.

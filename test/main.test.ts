@@ -6,8 +6,368 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { strip } from "../src/ansi";
 import { defaultConfig } from "../src/config";
-import { quotaCacheNeedsRefresh, renderStatusline, runCli } from "../src/main";
+import {
+  quotaCacheNeedsRefresh,
+  quotaCacheReadCandidates,
+  quotaCacheWritePath,
+  renderStatusline,
+  runCli
+} from "../src/main";
 import { execFileSync } from "node:child_process";
+
+function withEnv(overrides: Record<string, string | undefined>, run: () => void): void {
+  const saved: Record<string, string | undefined> = {};
+  for (const key of Object.keys(overrides)) {
+    saved[key] = process.env[key];
+    const value = overrides[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  try {
+    run();
+  } finally {
+    for (const key of Object.keys(saved)) {
+      const value = saved[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+const legacyCacheRelative = path.join(".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
+
+interface HomeFixture {
+  home: string;
+  writePath: string;
+  legacyPath: string;
+  probePath: string;
+  markerPath: string;
+}
+
+function homeFixture(): HomeFixture {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-home-"));
+  const writePath = path.join(home, ".cache", "agy-hud", "quota_cache.json");
+  const legacyPath = path.join(home, legacyCacheRelative);
+  const probePath = path.join(home, "spawn-probe.sh");
+  const markerPath = path.join(home, "spawned.txt");
+  fs.writeFileSync(probePath, `#!/bin/sh\necho "$@" >> "${markerPath}"\n`, { encoding: "utf8", mode: 0o755 });
+  return { home, writePath, legacyPath, probePath, markerPath };
+}
+
+function writeCache(cachePath: string, remainingFraction: number, ageMs: number): void {
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fs.writeFileSync(cachePath, JSON.stringify({
+    timestamp: new Date(Date.now() - ageMs).toISOString(),
+    models: {
+      "Gemini 3.5 Flash (High)": {
+        remainingFraction,
+        resetTime: "2026-05-20T08:00:00Z"
+      }
+    }
+  }), "utf8");
+}
+
+function statuslinePayload(agentState = "idle"): string {
+  return JSON.stringify({
+    cwd: "agy-hud",
+    conversation_id: "conv-1",
+    model: { display_name: "Gemini 3.5 Flash (High)" },
+    context_window: { used_percentage: 12 },
+    agent_state: agentState,
+    plan_tier: "Google AI Pro",
+    terminal_width: 120
+  });
+}
+
+async function runStatuslineInHome(fixture: HomeFixture, payload: string): Promise<string> {
+  const saved = {
+    home: process.env.HOME,
+    xdg: process.env.XDG_CACHE_HOME,
+    explicit: process.env.AGY_HUD_QUOTA_CACHE,
+    argv0: process.argv[0]
+  };
+  process.env.HOME = fixture.home;
+  delete process.env.XDG_CACHE_HOME;
+  delete process.env.AGY_HUD_QUOTA_CACHE;
+  process.argv[0] = fixture.probePath;
+
+  let out = "";
+  try {
+    const code = await runCli(["statusline"], {
+      stdin: Readable.from([payload]),
+      stdout: chunk => {
+        out += chunk;
+      },
+      stderr: () => {}
+    });
+    assert.equal(code, 0);
+  } finally {
+    process.argv[0] = saved.argv0;
+    if (saved.home === undefined) delete process.env.HOME;
+    else process.env.HOME = saved.home;
+    if (saved.xdg === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = saved.xdg;
+    if (saved.explicit === undefined) delete process.env.AGY_HUD_QUOTA_CACHE;
+    else process.env.AGY_HUD_QUOTA_CACHE = saved.explicit;
+  }
+  return strip(out);
+}
+
+async function waitForSpawn(markerPath: string): Promise<boolean> {
+  for (let i = 0; i < 20 && !fs.existsSync(markerPath); i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return fs.existsSync(markerPath);
+}
+
+test("statusline renders usage from the legacy cache when only the legacy cache exists", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+
+  const out = await runStatuslineInHome(fixture, statuslinePayload());
+
+  assert.match(out, /40% left/);
+});
+
+test("statusline prefers the new cache when both caches parse", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  writeCache(fixture.legacyPath, 0.9, 10_000);
+
+  const out = await runStatuslineInHome(fixture, statuslinePayload());
+
+  assert.match(out, /40% left/);
+});
+
+test("statusline falls back to a valid legacy cache when the new cache is corrupt, and forces a repair refresh", async () => {
+  const fixture = homeFixture();
+  fs.mkdirSync(path.dirname(fixture.writePath), { recursive: true });
+  fs.writeFileSync(fixture.writePath, "{ truncated", "utf8");
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+
+  const out = await runStatuslineInHome(fixture, statuslinePayload());
+
+  assert.match(out, /40% left/);
+  assert.equal(await waitForSpawn(fixture.markerPath), true, "a corrupt primary cache must force a repair refresh");
+});
+
+test("statusline omits usage when neither cache exists", async () => {
+  const fixture = homeFixture();
+
+  const out = await runStatuslineInHome(fixture, statuslinePayload());
+
+  assert.doesNotMatch(out, /Usage/);
+});
+
+function writeRefreshState(cachePath: string, agentState: string, ageMs = 60_000): void {
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fs.writeFileSync(`${cachePath}.statusline.json`, JSON.stringify({
+    conversationId: "conv-1",
+    agentState,
+    lastActivityAt: new Date(Date.now() - ageMs).toISOString()
+  }), "utf8");
+}
+
+async function runInHome<T>(fixture: HomeFixture, run: () => Promise<T>): Promise<T> {
+  const saved = {
+    home: process.env.HOME,
+    xdg: process.env.XDG_CACHE_HOME,
+    explicit: process.env.AGY_HUD_QUOTA_CACHE,
+    argv0: process.argv[0]
+  };
+  process.env.HOME = fixture.home;
+  delete process.env.XDG_CACHE_HOME;
+  delete process.env.AGY_HUD_QUOTA_CACHE;
+  process.argv[0] = fixture.probePath;
+  try {
+    return await run();
+  } finally {
+    process.argv[0] = saved.argv0;
+    if (saved.home === undefined) delete process.env.HOME;
+    else process.env.HOME = saved.home;
+    if (saved.xdg === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = saved.xdg;
+    if (saved.explicit === undefined) delete process.env.AGY_HUD_QUOTA_CACHE;
+    else process.env.AGY_HUD_QUOTA_CACHE = saved.explicit;
+  }
+}
+
+test("same-frame idle refresh targets the write path and reloads from it", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  writeRefreshState(fixture.writePath, "working");
+  const seen: string[] = [];
+
+  const out = await runInHome(fixture, async () => {
+    let captured = "";
+    await runCli(["statusline"], {
+      stdin: Readable.from([statuslinePayload("idle")]),
+      stdout: chunk => {
+        captured += chunk;
+      },
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        seen.push(cachePath);
+        writeCache(cachePath, 0.1, 0);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+    return strip(captured);
+  });
+
+  assert.deepEqual(seen, [fixture.writePath]);
+  assert.match(out, /10% left/, "the HUD must render the cache reloaded from the write path");
+});
+
+test("background refresh writes lock and state under the new path only", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 60_000);
+
+  await runStatuslineInHome(fixture, statuslinePayload());
+
+  assert.equal(fs.existsSync(`${fixture.writePath}.lock`), true);
+  assert.equal(fs.existsSync(`${fixture.writePath}.statusline.json`), true);
+  assert.equal(fs.existsSync(`${fixture.legacyPath}.lock`), false);
+  assert.equal(fs.existsSync(`${fixture.legacyPath}.statusline.json`), false);
+});
+
+test("background refresh starts when the new cache directory does not exist yet", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 60_000);
+  assert.equal(fs.existsSync(path.dirname(fixture.writePath)), false);
+
+  await runStatuslineInHome(fixture, statuslinePayload());
+
+  assert.equal(await waitForSpawn(fixture.markerPath), true);
+});
+
+test("upgrade on a working-to-idle transition still refreshes using the legacy debounce state", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+  writeRefreshState(fixture.legacyPath, "working", 60_000);
+  const seen: string[] = [];
+
+  await runInHome(fixture, async () => {
+    await runCli(["statusline"], {
+      stdin: Readable.from([statuslinePayload("idle")]),
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        seen.push(cachePath);
+        writeCache(cachePath, 0.1, 0);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+  });
+
+  assert.deepEqual(seen, [fixture.writePath], "the legacy working state must drive the same-frame refresh");
+});
+
+test("a corrupt primary debounce state does not resurrect the legacy state", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+  writeRefreshState(fixture.legacyPath, "working", 60_000);
+  fs.mkdirSync(path.dirname(fixture.writePath), { recursive: true });
+  fs.writeFileSync(`${fixture.writePath}.statusline.json`, "{ truncated", "utf8");
+  const seen: string[] = [];
+
+  await runInHome(fixture, async () => {
+    await runCli(["statusline"], {
+      stdin: Readable.from([statuslinePayload("idle")]),
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        seen.push(cachePath);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+  });
+
+  assert.deepEqual(seen, [], "a corrupt primary state must read as null, not fall back to a stale working state");
+});
+
+test("background refresh reads the debounce state through the fallback independently of the same-frame path", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+  // lastActivityAt inside the 5s window suppresses the same-frame refresh, so only the background
+  // trigger can act on this state. It can only see "working" through the fallback.
+  writeRefreshState(fixture.legacyPath, "working", 1_000);
+  const seen: string[] = [];
+
+  await runInHome(fixture, async () => {
+    await runCli(["statusline"], {
+      stdin: Readable.from([statuslinePayload("idle")]),
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        seen.push(cachePath);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+  });
+
+  assert.deepEqual(seen, [], "the same-frame refresh must stay suppressed by the 5s debounce");
+  assert.equal(await waitForSpawn(fixture.markerPath), true, "the background trigger must see the fallback state");
+});
+
+test("the post-refresh state is rebuilt from the payload and never inherits legacy fields", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.legacyPath, 0.4, 10_000);
+  fs.mkdirSync(path.dirname(fixture.legacyPath), { recursive: true });
+  fs.writeFileSync(`${fixture.legacyPath}.statusline.json`, JSON.stringify({
+    conversationId: "old-conv",
+    agentState: "working",
+    lastActivityAt: new Date(Date.now() - 60_000).toISOString()
+  }), "utf8");
+
+  await runInHome(fixture, async () => {
+    await runCli(["statusline"], {
+      stdin: Readable.from([statuslinePayload("idle")]),
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        writeCache(cachePath, 0.1, 0);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+  });
+
+  const written = JSON.parse(fs.readFileSync(`${fixture.writePath}.statusline.json`, "utf8"));
+  assert.equal(written.conversationId, "conv-1");
+  assert.equal(written.agentState, "idle");
+  assert.ok(
+    Date.now() - new Date(written.lastActivityAt).getTime() < 5_000,
+    "lastActivityAt must be stamped fresh, not inherited from the legacy companion"
+  );
+});
+
+test("quota refresh targets the write path and leaves a legacy lock alone", async () => {
+  const fixture = homeFixture();
+  fs.mkdirSync(path.dirname(fixture.legacyPath), { recursive: true });
+  fs.writeFileSync(`${fixture.legacyPath}.lock`, new Date().toISOString(), "utf8");
+  const seen: string[] = [];
+
+  await runInHome(fixture, async () => {
+    const code = await runCli(["quota", "refresh"], {
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async (cachePath: string) => {
+        seen.push(cachePath);
+        return { ok: true, message: "refreshed" };
+      }
+    });
+    assert.equal(code, 0);
+  });
+
+  assert.deepEqual(seen, [fixture.writePath], "quota refresh must write the cache to the write path");
+  assert.equal(fs.existsSync(`${fixture.legacyPath}.lock`), true, "a legacy lock must never be unlinked");
+});
 
 function worktreeFixture(): { repo: string; worktree: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-"));
@@ -208,21 +568,65 @@ const packageVersion = JSON.parse(
   fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8")
 ).version as string;
 
+test("quota cache write path honors XDG_CACHE_HOME", () => {
+  withEnv({ AGY_HUD_QUOTA_CACHE: undefined, XDG_CACHE_HOME: "/tmp/xdg-cache", HOME: "/tmp/home" }, () => {
+    assert.equal(quotaCacheWritePath(), path.join("/tmp/xdg-cache", "agy-hud", "quota_cache.json"));
+  });
+});
+
+test("quota cache write path falls back to ~/.cache when XDG_CACHE_HOME is unset", () => {
+  withEnv({ AGY_HUD_QUOTA_CACHE: undefined, XDG_CACHE_HOME: undefined, HOME: "/tmp/home" }, () => {
+    assert.equal(quotaCacheWritePath(), path.join("/tmp/home", ".cache", "agy-hud", "quota_cache.json"));
+  });
+});
+
+test("AGY_HUD_QUOTA_CACHE overrides the write path and is the only read candidate", () => {
+  withEnv({ AGY_HUD_QUOTA_CACHE: "/tmp/explicit/quota_cache.json", XDG_CACHE_HOME: undefined, HOME: "/tmp/home" }, () => {
+    assert.equal(quotaCacheWritePath(), "/tmp/explicit/quota_cache.json");
+    assert.deepEqual(quotaCacheReadCandidates(), ["/tmp/explicit/quota_cache.json"]);
+  });
+});
+
+test("quota cache read candidates list the new path before the legacy path", () => {
+  withEnv({ AGY_HUD_QUOTA_CACHE: undefined, XDG_CACHE_HOME: undefined, HOME: "/tmp/home" }, () => {
+    assert.deepEqual(quotaCacheReadCandidates(), [
+      path.join("/tmp/home", ".cache", "agy-hud", "quota_cache.json"),
+      path.join("/tmp/home", legacyCacheRelative)
+    ]);
+  });
+});
+
+// These run the CLI in a subprocess, which walks the real statusline path: it loads the cache,
+// writes the debounce state and the lock, and can spawn a detached refresh. Without an override it
+// would do all of that against the developer's real home directory.
+function sandboxedEnv(): NodeJS.ProcessEnv {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-sandbox-"));
+  return { ...process.env, AGY_HUD_QUOTA_CACHE: path.join(dir, "quota_cache.json") };
+}
+
 test("CLI version prints package version and empty stdin prints agy-hud", () => {
   const entry = path.join(__dirname, "..", "src", "main.js");
-  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8" }), `${packageVersion}\n`);
-  assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8" }), "agy-hud\n");
+  const env = sandboxedEnv();
+  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8", env }), `${packageVersion}\n`);
+  assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8", env }), "agy-hud\n");
 });
 
 test("dist bundle CLI smoke test", () => {
   const entry = path.join(__dirname, "..", "..", "dist", "agy-hud.js");
-  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8" }), `${packageVersion}\n`);
-  assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8" }), "agy-hud\n");
+  const env = sandboxedEnv();
+  assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8", env }), `${packageVersion}\n`);
+  assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8", env }), "agy-hud\n");
 });
 
 test("CLI quota refresh does not fall through to usage", async () => {
   let stdout = "";
   let stderr = "";
+
+  // Without an override, the lock cleanup in the quota refresh command would unlink a lock at the
+  // real default cache path, which may belong to a live refresh on the developer's machine.
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-sandbox-"));
+  const oldCacheEnv = process.env.AGY_HUD_QUOTA_CACHE;
+  process.env.AGY_HUD_QUOTA_CACHE = path.join(sandbox, "quota_cache.json");
 
   const code = await runCli(["quota", "refresh"], {
     stdout: chunk => {
@@ -236,6 +640,9 @@ test("CLI quota refresh does not fall through to usage", async () => {
       message: "Successfully cached processed quota data to /tmp/quota_cache.json",
       summary: "- Gemini 3.5 Flash (High)     : Usage  58% | Reset 2026-05-20T08:00:00Z"
     })
+  }).finally(() => {
+    if (oldCacheEnv === undefined) delete process.env.AGY_HUD_QUOTA_CACHE;
+    else process.env.AGY_HUD_QUOTA_CACHE = oldCacheEnv;
   });
 
   assert.equal(code, 0);

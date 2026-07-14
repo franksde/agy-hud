@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8
+
+- Moved the quota cache to `$XDG_CACHE_HOME/agy-hud/` (or `$HOME/.cache/agy-hud/`), out of the `~/.gemini/antigravity-cli/` tree that the Antigravity CLI abandoned in 1.1.0.
+- Upgrades are seamless and need no action: the HUD still reads the old cache until the first refresh writes the new one, and the old file is left in place so downgrades keep working.
+- Force a refresh when the new cache exists but cannot be parsed, so a truncated file cannot be masked indefinitely by a fresh legacy cache.
+- Fixed the subprocess tests writing state and lock files into the real home directory, where they could spawn a detached refresh or unlink a live lock.
+
 ## 0.1.7
 
 - Adapted to the Antigravity CLI native status-line architecture: removed the `components` hook block from `plugin.json`, which newer CLI versions no longer honor.

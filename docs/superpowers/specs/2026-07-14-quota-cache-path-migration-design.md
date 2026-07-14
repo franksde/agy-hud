@@ -158,12 +158,13 @@ In the `statusline` command (`src/main.ts:174-189`):
 |---|---|
 | `shouldRefreshBeforeRender` (`src/main.ts:272`) | Fallback (absent-primary only) |
 | `triggerBackgroundRefreshIfNeeded` (`src/main.ts:290`) | Fallback (absent-primary only) |
-| Post-refresh merge in `refreshQuotaBeforeRenderIfNeeded` (`src/main.ts:260`) | **Write path only** |
+| Post-refresh merge in `refreshQuotaBeforeRenderIfNeeded` (`src/main.ts:260`) | **Read removed** |
 
-The third is a deliberate exception. It is the read half of a read-modify-write whose write always
-targets the write path, and it runs *after* a successful refresh, at which point the write path is
-authoritative. Reading a legacy companion there would merge stale fields into a file we are about to
-overwrite. It gets no fallback, and a test pins this.
+The third call site turned out to be dead work, which only became visible while implementing. It
+reaches `mergeStatuslineRefreshState` with a non-null payload and `activityRefresh` hard-coded to
+`true`, and that overwrites every field of the merged state — so whatever it loaded was discarded.
+Rather than give a dead read a fallback policy, the read is removed and `null` is passed. A test pins
+the resulting state: rebuilt from the payload with a fresh `lastActivityAt`, inheriting nothing.
 
 ### Directory creation ordering
 
