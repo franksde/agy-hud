@@ -29,6 +29,11 @@ agy plugin install ./agy-hud
 
 解压出的目录就是一个完整的插件(包含 `plugin.json`、`hooks/`、`dist/`),可以直接传给 `agy plugin install`。它需要 Node.js 18+,解压后不需要再运行 `npm install`。
 
+**重要：安装完成后，请在你的 Antigravity CLI 交互式命令行内运行以下命令来启用状态栏：**
+```
+/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh
+```
+
 ## 从本地路径安装
 
 仓库已包含打包后的运行脚本 `dist/agy-hud.js`, fresh clone 后可直接安装:
@@ -63,7 +68,7 @@ npm test
 
 3. 用户确认后,下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压。
 
-4. 执行 `agy plugin install <解压目录>`。如果失败,把错误展示给用户,不要静默重试。
+4. 执行 `agy plugin install <解压目录>`。安装成功后，请提示用户在 CLI 中运行 `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` 来启用状态栏。如果失败,把错误展示给用户,不要静默重试。
 
 ## Release 归档内容
 

@@ -29,6 +29,11 @@ agy plugin install ./agy-hud
 
 The extracted directory is a complete plugin (`plugin.json`, `hooks/`, `dist/`), so it can be passed straight to `agy plugin install`. It runs with Node.js 18+ and does not require `npm install` after extraction.
 
+**Important: After installation, you must run the following slash command inside your Antigravity CLI to enable the HUD:**
+```
+/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh
+```
+
 ## Install From Local Path
 
 The repository includes the bundled runtime script at `dist/agy-hud.js`, so a fresh clone can be installed directly:
@@ -63,7 +68,7 @@ If you are an AI agent installing `agy-hud` for someone, do not install silently
 
 3. After the user confirms, download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, then extract it.
 
-4. Run `agy plugin install <extracted-dir>`. If it fails, show the user the error instead of retrying silently.
+4. Run `agy plugin install <extracted-dir>`. After successful installation, instruct the user to run `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` in their CLI. If it fails, show the user the error instead of retrying silently.
 
 ## Expected Release Install Shape
 
