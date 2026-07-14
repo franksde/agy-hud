@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- 支持插件的 Antigravity CLI
+- Antigravity CLI。1.1.0 及以上版本使用 CLI 原生的 `/statusline` 命令来接入状态栏;旧版 `plugin.json` 里声明的 `components` hook 已不再被识别,因此必须显式指定 HUD(见下文)。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 
@@ -36,26 +36,55 @@ agy plugin install ./agy-hud
 
 ## 从本地路径安装
 
-仓库已包含打包后的运行脚本 `dist/agy-hud.js`, fresh clone 后可直接安装:
+不要把 git clone 出来的仓库目录直接传给 `agy plugin install`。该命令会拷贝**整个**目录,于是 `.git/`、`src/`、`test/` 之类全都会被塞进插件目录;而且如果这个 clone 启用了 git fsmonitor,拷贝会直接失败在 `.git/fsmonitor--daemon.ipc` 上——那是一个 socket,不是普通文件。
+
+正确做法是先按 release 归档的文件清单构造一个干净目录,再安装它:
 
 ```sh
-agy plugin validate <agy-hud-目录路径>
-agy plugin install <agy-hud-目录路径>
+npm ci && npm run build && npm test
+
+stage=$(mktemp -d)/agy-hud
+mkdir -p "$stage/hooks" "$stage/dist" "$stage/docs"
+cp plugin.json config.example.json README.md README.zh-CN.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
+cp hooks/status-line.sh "$stage/hooks/"
+cp dist/agy-hud.js "$stage/dist/"
+cp docs/hud-preview.png "$stage/docs/"
+
+agy plugin validate "$stage"
+agy plugin install "$stage"
 ```
 
 本地安装和 release 安装会落到同一个插件目录,所以上面那条 `/statusline` 命令在这里同样需要执行。
 
-如果修改了 TypeScript 源码,安装前请重新构建 bundle:
+## 升级
+
+**装上新版本 ≠ 升级完成。** CLI 的 `statusLine.command` 指向的是某一个具体文件,而 `agy plugin install` 并不会去更新它。如果你的 command 仍然指向旧的那份 `dist/agy-hud.js`,那么跑的就还是旧版本:HUD 一切正常、没有任何报错,你只是没升级而已。先确认你实际在跑哪一份:
 
 ```sh
-npm ci
-npm run build
-npm test
+grep -A2 '"statusLine"' ~/.gemini/antigravity-cli/settings.json   # 接的是哪个文件
+agy-hud version                                                    # 或直接用 version 跑那个文件
 ```
+
+**如果你的 HUD 现在是正常的**,最省事的升级就是把 command 指向的那个文件覆盖掉。接线一个字都不用改,也不需要执行任何 slash command:
+
+```sh
+curl -fsSL -o agy-hud.tar.gz \
+  https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
+tar -xzf agy-hud.tar.gz
+cp agy-hud/dist/agy-hud.js <你的-statusLine-command-指向的目录>/dist/agy-hud.js
+```
+
+**如果你的 HUD 在把 Antigravity CLI 升到 1.1.x 之后就消失了**,说明你之前依赖的是旧的 `components` hook,而新版 CLI 不再注册它。按上面的安装步骤装好新版,并用 `/statusline` 接一次线即可。这一步无法省略:插件没有任何 install hook 能替你写入状态栏配置——`components` 原本就是那个机制,而它已经没了。
+
+配额缓存在两种情况下都无需任何操作,见[配额缓存](#配额缓存)。
 
 ## 面向 AI Agent
 
 如果你是正在替用户安装 `agy-hud` 的 AI agent,请不要静默安装。先确认显示效果。
+
+**先判断用户是不是已经装过**:读 `~/.gemini/antigravity-cli/settings.json` 里的 `statusLine.command`。如果它已经指向某个 `agy-hud.js`,那这就是一次**升级**而不是安装:请按[升级](#升级)一节,直接覆盖那个文件。不要只是 `agy plugin install` 到新的插件目录就收工——那样 CLI 跑的仍是旧文件,HUD 看起来完全正常,用户永远不会发现自己还停在旧版本。
+
+如果确认是全新安装:
 
 1. 把下面这段信息完整的 HUD 预览发给用户,让他们在安装之前就看到每一个元素:
 
@@ -70,7 +99,7 @@ npm test
 
 3. 用户确认后,下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压。
 
-4. 执行 `agy plugin install <解压目录>`。安装成功后，请提示用户在 CLI 中运行 `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` 来启用状态栏。如果失败,把错误展示给用户,不要静默重试。
+4. 执行 `agy plugin install <解压目录>`。传入的必须是解压出来的归档目录,绝不能是 git clone 的仓库目录(原因见[从本地路径安装](#从本地路径安装))。安装成功后,请提示用户在 CLI 中运行 `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` 来启用状态栏——在此之前 HUD 不会出现。如果失败,把错误展示给用户,不要静默重试。
 
 ## Release 归档内容
 
@@ -142,6 +171,9 @@ $HOME/.cache/agy-hud/quota_cache.json   # 未设置 XDG_CACHE_HOME 时
 0.1.8 之前,缓存位于 `$HOME/.gemini/antigravity-cli/scratch/agy-hud/quota_cache.json`,而那个目录在
 Antigravity CLI 1.1.0 之后已被官方弃用。升级无需任何操作:新缓存还不存在时,HUD 仍会读取旧文件,
 第一次刷新就会写出新缓存。旧文件会原样保留,所以降级回旧版本同样可以正常工作。
+
+如果新缓存存在但解析不出来(比如一次写入被崩溃打断),HUD 会改用旧缓存渲染,并强制触发一次刷新去
+重写这个损坏的文件,而不是让它一直被掩盖着。
 
 Antigravity 运行时,可以手动刷新这份回退缓存:
 

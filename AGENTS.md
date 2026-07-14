@@ -32,13 +32,18 @@ npm test
 
 Antigravity runs the installed plugin copy, not necessarily this working tree. After changing HUD rendering or quota behavior, rebuild and sync the bundle before asking the user to verify in the live CLI:
 
+Sync the bundle to the file the CLI actually runs, which is whatever `statusLine.command` points at in `$HOME/.gemini/antigravity-cli/settings.json`. Do not assume it is the current plugin directory:
+
 ```sh
 npm test
-cp dist/agy-hud.js "$HOME/.gemini/config/plugins/agy-hud/dist/agy-hud.js"
-node "$HOME/.gemini/config/plugins/agy-hud/dist/agy-hud.js" statusline < testdata/statusline_payload.json
+grep -A2 '"statusLine"' "$HOME/.gemini/antigravity-cli/settings.json"   # find the wired-up file
+cp dist/agy-hud.js <that-directory>/dist/agy-hud.js
+node <that-directory>/dist/agy-hud.js statusline < testdata/statusline_payload.json
 ```
 
-`agy plugin install` places plugins under `$HOME/.gemini/config/plugins`. Installs predating the Antigravity CLI 1.1.0 config migration may still leave a stale copy under `$HOME/.gemini/antigravity-cli/plugins/agy-hud`, which the CLI no longer reads.
+`agy plugin install` places plugins under `$HOME/.gemini/config/plugins`, but it does NOT update `statusLine.command`. A user who installed before the Antigravity CLI 1.1.0 config migration can still be wired to `$HOME/.gemini/antigravity-cli/plugins/agy-hud`, so installing a new version there changes nothing and the CLI keeps running the old bundle without any error.
+
+Never pass a git clone to `agy plugin install`: it copies the whole directory, including `.git/`, and aborts outright when fsmonitor's `.git/fsmonitor--daemon.ipc` socket is present. Stage the release file set first, as `README.md` describes.
 
 If the live CLI still shows old output, first check that this installed bundle was updated. Do not assume the user is testing the working-tree `dist/agy-hud.js`.
 

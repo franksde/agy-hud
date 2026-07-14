@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI with plugin support
+- Antigravity CLI. On 1.1.0 and newer the status line is wired with the CLI's native `/statusline` command; the `components` hook that older `plugin.json` files declared is no longer honored, so the HUD must be pointed at explicitly (see below).
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 
@@ -36,26 +36,55 @@ The extracted directory is a complete plugin (`plugin.json`, `hooks/`, `dist/`),
 
 ## Install From Local Path
 
-The repository includes the bundled runtime script at `dist/agy-hud.js`, so a fresh clone can be installed directly:
+Do not pass a git clone straight to `agy plugin install`. The command copies the *entire* directory, so it would drag `.git/`, `src/`, `test/`, and everything else into the plugin directory — and if the clone has git's fsmonitor enabled, the copy aborts outright on `.git/fsmonitor--daemon.ipc`, because it is a socket rather than a file.
+
+Stage the same file set the release archive ships, then install that:
 
 ```sh
-agy plugin validate <path-to-agy-hud>
-agy plugin install <path-to-agy-hud>
+npm ci && npm run build && npm test
+
+stage=$(mktemp -d)/agy-hud
+mkdir -p "$stage/hooks" "$stage/dist" "$stage/docs"
+cp plugin.json config.example.json README.md README.zh-CN.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
+cp hooks/status-line.sh "$stage/hooks/"
+cp dist/agy-hud.js "$stage/dist/"
+cp docs/hud-preview.png "$stage/docs/"
+
+agy plugin validate "$stage"
+agy plugin install "$stage"
 ```
 
 A local install lands in the same plugin directory as a release install, so the `/statusline` step above is required here too.
 
-If you edit the TypeScript sources, rebuild the bundle before installing:
+## Upgrading
+
+**Installing a new version is not the same as upgrading.** The CLI's `statusLine.command` points at a specific file, and `agy plugin install` does not update it. If your command still points at an older copy of `dist/agy-hud.js`, that older copy keeps running: the HUD looks fine, nothing errors, and you are simply not on the new version. Check what you are actually running:
 
 ```sh
-npm ci
-npm run build
-npm test
+grep -A2 '"statusLine"' ~/.gemini/antigravity-cli/settings.json   # which file is wired up
+agy-hud version                                                    # or run that file with: version
 ```
+
+**If the HUD is currently working**, the smallest upgrade is to overwrite the file your command already points at. Nothing else changes, and no slash command is needed:
+
+```sh
+curl -fsSL -o agy-hud.tar.gz \
+  https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
+tar -xzf agy-hud.tar.gz
+cp agy-hud/dist/agy-hud.js <the-directory-your-statusLine-command-points-at>/dist/agy-hud.js
+```
+
+**If your HUD disappeared after updating the Antigravity CLI to 1.1.x**, you were relying on the old `components` hook, which the CLI no longer registers. Install the new version normally and wire it up once with `/statusline`, as in the install sections above. This step is unavoidable: a plugin has no install hook that can write the status-line setting for you — `components` *was* that mechanism, and it is gone.
+
+The quota cache needs no action either way. See [Quota Cache](#quota-cache).
 
 ## For AI Agents
 
 If you are an AI agent installing `agy-hud` for someone, do not install silently. Confirm the look first.
+
+**First check whether they already have it**, by reading `statusLine.command` in `~/.gemini/antigravity-cli/settings.json`. If it already points at an `agy-hud.js`, this is an upgrade, not an install: follow [Upgrading](#upgrading) and overwrite that exact file. Do not `agy plugin install` into the new plugin directory and stop there — the CLI would keep running the old copy, the HUD would look perfectly healthy, and the user would never learn they are still on the old version.
+
+For a genuinely new install:
 
 1. Send the user this preview of a fully-populated HUD so they see every element before anything is installed:
 
@@ -70,7 +99,7 @@ If you are an AI agent installing `agy-hud` for someone, do not install silently
 
 3. After the user confirms, download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, then extract it.
 
-4. Run `agy plugin install <extracted-dir>`. After successful installation, instruct the user to run `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` in their CLI. If it fails, show the user the error instead of retrying silently.
+4. Run `agy plugin install <extracted-dir>`. Pass the extracted archive directory, never a git clone (see [Install From Local Path](#install-from-local-path) for why). After successful installation, instruct the user to run `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` in their CLI — the HUD does not appear until they do. If it fails, show the user the error instead of retrying silently.
 
 ## Expected Release Install Shape
 
@@ -144,6 +173,9 @@ Before 0.1.8 the cache lived at `$HOME/.gemini/antigravity-cli/scratch/agy-hud/q
 inside a directory the Antigravity CLI abandoned in 1.1.0. Upgrading needs no action: the HUD still
 reads that old file when no new cache exists yet, and the first refresh writes the new one. The old
 file is left in place, so downgrading keeps working too.
+
+If the new cache exists but cannot be parsed — a write interrupted by a crash, say — the HUD renders
+from the old cache and forces a refresh to rewrite the damaged file, rather than leaving it masked.
 
 Refresh the fallback cache manually when Antigravity is running:
 
