@@ -43,6 +43,8 @@ agy plugin validate <path-to-agy-hud>
 agy plugin install <path-to-agy-hud>
 ```
 
+A local install lands in the same plugin directory as a release install, so the `/statusline` step above is required here too.
+
 If you edit the TypeScript sources, rebuild the bundle before installing:
 
 ```sh

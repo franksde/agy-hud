@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Adapted to the Antigravity CLI native status-line architecture: removed the `components` hook block from `plugin.json`, which newer CLI versions no longer honor.
+- Documented the `/statusline <plugin-dir>/hooks/status-line.sh` command needed to enable the HUD after install, for both release and local-path installs.
+- Updated the local plugin verification path to `$HOME/.gemini/config/plugins/agy-hud`, where `agy plugin install` now places plugins.
+- Thanks to @lbwds for reporting and fixing the plugin manifest and install docs.
+
 ## 0.1.6
 
 - Show both 5-hour and weekly quota windows when Antigravity provides both buckets.

@@ -43,6 +43,8 @@ agy plugin validate <agy-hud-目录路径>
 agy plugin install <agy-hud-目录路径>
 ```
 
+本地安装和 release 安装会落到同一个插件目录,所以上面那条 `/statusline` 命令在这里同样需要执行。
+
 如果修改了 TypeScript 源码,安装前请重新构建 bundle:
 
 ```sh

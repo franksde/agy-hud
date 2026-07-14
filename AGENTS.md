@@ -34,9 +34,11 @@ Antigravity runs the installed plugin copy, not necessarily this working tree. A
 
 ```sh
 npm test
-cp dist/agy-hud.js "$HOME/.gemini/antigravity-cli/plugins/agy-hud/dist/agy-hud.js"
-node "$HOME/.gemini/antigravity-cli/plugins/agy-hud/dist/agy-hud.js" statusline < testdata/statusline_payload.json
+cp dist/agy-hud.js "$HOME/.gemini/config/plugins/agy-hud/dist/agy-hud.js"
+node "$HOME/.gemini/config/plugins/agy-hud/dist/agy-hud.js" statusline < testdata/statusline_payload.json
 ```
+
+`agy plugin install` places plugins under `$HOME/.gemini/config/plugins`. Installs predating the Antigravity CLI 1.1.0 config migration may still leave a stale copy under `$HOME/.gemini/antigravity-cli/plugins/agy-hud`, which the CLI no longer reads.
 
 If the live CLI still shows old output, first check that this installed bundle was updated. Do not assume the user is testing the working-tree `dist/agy-hud.js`.
 
@@ -54,4 +56,4 @@ If the live CLI still shows old output, first check that this installed bundle w
 - CI expects `npm test` to pass.
 - Keep `README.md` and `README.zh-CN.md` in sync when user-facing behavior changes.
 - Keep `dist/agy-hud.js` in sync with TypeScript changes.
-- Do not edit files under `$HOME/.gemini/antigravity-cli/plugins/agy-hud` except as a local verification sync step. Those installed-plugin files are not the source of truth.
+- Do not edit files under `$HOME/.gemini/config/plugins/agy-hud` except as a local verification sync step. Those installed-plugin files are not the source of truth.
