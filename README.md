@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Antigravity CLI 1.1.0 or newer, verified through 1.1.8. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 
@@ -95,6 +95,22 @@ node <plugin-root>/dist/agy-hud.js version   # confirm it now reports the new ve
 **If your HUD disappeared after updating the Antigravity CLI to 1.1.x**, you were relying on the old `components` hook, which the CLI no longer registers. Install the new version normally and wire it up once with `/statusline`, as in the install sections above. This step is unavoidable: a plugin has no install hook that can write the status-line setting for you — `components` *was* that mechanism, and it is gone.
 
 The quota cache needs no action either way. See [Quota Cache](#quota-cache).
+
+## Uninstalling
+
+The `/statusline` command stores its configuration separately from the plugin files. Clear that
+configuration before uninstalling so the CLI does not retain a command that points at the removed
+plugin:
+
+```text
+/statusline delete
+```
+
+Then uninstall the plugin:
+
+```sh
+agy plugin uninstall agy-hud
+```
 
 ## For AI Agents
 

@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本,已验证至 1.1.8。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 
@@ -95,6 +95,21 @@ node <插件根目录>/dist/agy-hud.js version   # 确认已经报告新版本�
 **如果你的 HUD 在把 Antigravity CLI 升到 1.1.x 之后就消失了**,说明你之前依赖的是旧的 `components` hook,而新版 CLI 不再注册它。按上面的安装步骤装好新版,并用 `/statusline` 接一次线即可。这一步无法省略:插件没有任何 install hook 能替你写入状态栏配置——`components` 原本就是那个机制,而它已经没了。
 
 配额缓存在两种情况下都无需任何操作,见[配额缓存](#配额缓存)。
+
+## 卸载
+
+`/statusline` 命令会把配置独立保存在插件文件之外。卸载前请先清除这项配置,避免 CLI
+继续保留一个指向已删除插件的 command:
+
+```text
+/statusline delete
+```
+
+然后卸载插件:
+
+```sh
+agy plugin uninstall agy-hud
+```
 
 ## 面向 AI Agent
 
