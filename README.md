@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer, verified through 1.1.8. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Antigravity CLI 1.1.0 or newer, verified through 1.1.13. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 
