@@ -375,3 +375,15 @@ test("discovery continues past a listener returning non-quota JSON", async () =>
   assert.equal((await refreshQuota("/tmp/quota-multi-port-test.json", runtime)).ok, true);
   assert.deepEqual(calls.requests, [1111, 2222]);
 });
+
+test("unavailable process identity disables hints but not full quota discovery", async () => {
+  for (const inspect of [() => null, () => { throw new Error("ps timeout"); }]) {
+    const { runtime, calls, files } = hintRuntime();
+    runtime.processIdentity = inspect;
+    const result = await refreshQuota("/tmp/quota-no-identity-test.json", runtime);
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls.requests, [2222]);
+    assert.match(files["/tmp/quota-no-identity-test.json"], /"remainingFraction": 0.4/);
+    assert.equal(files["/tmp/quota-no-identity-test.json.server.json"], undefined);
+  }
+});

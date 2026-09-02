@@ -18,3 +18,9 @@ test("visibleLen measures terminal columns for CJK, emoji and combining marks", 
     assert.equal(visibleLen(input), want, input);
   }
 });
+
+test("recent emoji sequences and extended combining marks use display columns", () => {
+  for (const [input, want] of [["🫨", 2], ["🫠", 2], ["🪿", 2], ["🧑🏽‍💻", 2], ["e\u1ab0", 1], ["a\u200db", 2]] as const) {
+    assert.equal(visibleLen(input), want, input);
+  }
+});

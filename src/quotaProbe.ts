@@ -146,8 +146,9 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
   let sawPort = false;
   let sawResponse = false;
   for (const info of candidates) {
+    // Identity is required only for hint reuse. If targeted inspection fails, full discovery
+    // must remain available; the optional optimization must never disable quota refreshes.
     const identity = info.kind === "agy" ? processIdentity(runtime, info.pid) : null;
-    if (info.kind === "agy" && runtime.processIdentity && !identity) continue;
     let ports: number[];
     try {
       ports = parseListeningPorts(runtime.lsof(info.pid));

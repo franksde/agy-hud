@@ -558,6 +558,15 @@ test("narrow CJK model headers are clipped to columns without splitting grapheme
   }
 });
 
+test("recent emoji headers neither overflow nor disappear at two columns", () => {
+  for (const model of ["🫨", "🧑🏽‍💻"]) {
+    const out = render({ model: { display_name: `${model}abc` }, terminal_width: 2 }, {
+      config: { ...defaultConfig(), color: false, showIcons: false, showAgentState: false }
+    });
+    assert.equal(out.split("\n")[0], model);
+  }
+});
+
 test("cost and wide workspace labels obey both layout width limits", () => {
   for (const multiline of [true, false]) {
     for (const width of [10, 20, 30, 40, 60, 80]) {

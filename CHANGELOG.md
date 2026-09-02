@@ -6,7 +6,7 @@
 - Added session token-cost display from CLI 1.1.21+ (`cost.total_usd`), enabled by default with `show_cost`. Estimates carry `~`; invalid values are omitted. The HUD displays the supplied total without adding subagent cost separately or calculating subscription charges.
 - Cost is the first segment hidden on narrow terminals, preserving directory, branch and quota information that already fits.
 - Recognize both short and `Google AI`-prefixed Pro, Ultra and Free tiers. Unrecognized tiers display `Plan ?` instead of incorrectly claiming Free.
-- Measure terminal columns for CJK, emoji and combining marks; truncate on grapheme boundaries and strip ANSI/OSC sequences when clipping.
+- Measure terminal columns for CJK, current emoji sequences and combining marks; truncate on grapheme boundaries and strip ANSI/OSC sequences when clipping.
 - Reuse a short-lived, credential-free local `agy` server hint after checking its PID, start time and executable path. Failed, expired or malformed hints fall back to discovery in the same refresh. Quota refresh frequency and same-frame correction are unchanged.
 - Continue discovery when a listener returns unrelated JSON instead of quota data.
 - Added regression coverage for current Gemini, Claude and GPT labels, dual quota windows, config overrides, cost degradation, Unicode width and server-hint recovery.
