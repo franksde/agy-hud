@@ -8,6 +8,7 @@ export interface Config {
   showGitBranch: boolean;
   showCWD: boolean;
   showAgentState: boolean;
+  showCost: boolean;
   showIcons: boolean;
   contextValue: string;
   usageValue: string;
@@ -23,6 +24,7 @@ export function defaultConfig(): Config {
     showGitBranch: true,
     showCWD: true,
     showAgentState: true,
+    showCost: true,
     showIcons: true,
     contextValue: "percent",
     usageValue: "remaining",
@@ -55,6 +57,7 @@ function merge(base: Config, patch: Record<string, unknown>): Config {
   if (typeof patch.show_git_branch === "boolean") base.showGitBranch = patch.show_git_branch;
   if (typeof patch.show_cwd === "boolean") base.showCWD = patch.show_cwd;
   if (typeof patch.show_agent_state === "boolean") base.showAgentState = patch.show_agent_state;
+  if (typeof patch.show_cost === "boolean") base.showCost = patch.show_cost;
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;

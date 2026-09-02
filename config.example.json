@@ -7,6 +7,7 @@
   "show_git_branch": true,
   "show_cwd": true,
   "show_agent_state": true,
+  "show_cost": true,
   "show_icons": true,
   "context_value": "percent",
   "usage_value": "remaining"

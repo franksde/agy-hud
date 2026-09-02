@@ -89,9 +89,10 @@ Also note that `statusline` only runs when the CLI redraws. There is no such thi
 during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
 quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
 
-If probe cost is the real concern, make each probe cheaper rather than rarer: it currently runs
-`ps aux` and `lsof` to rediscover the loopback port on every call, and that port is stable for the
-CLI's lifetime.
+Make each probe cheaper rather than rarer. Since 0.1.9, a credential-free `.server.json` hint can
+reuse a loopback port after a targeted `ps` check verifies the same PID, start time and executable.
+Hints expire after five minutes; failed or malformed replies fall back to `ps aux` / `lsof`
+discovery in the same refresh. Do not cache legacy CSRF tokens or relax this identity check.
 
 ## Release And CI
 

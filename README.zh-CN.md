@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本,已验证至 1.1.13。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本,已验证至 1.1.24。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 
@@ -45,7 +45,7 @@ npm ci && npm run build && npm test
 
 stage=$(mktemp -d)/agy-hud
 mkdir -p "$stage/hooks" "$stage/dist" "$stage/docs"
-cp plugin.json config.example.json README.md README.zh-CN.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
+cp plugin.json config.example.json README.md README.zh-CN.md LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
 cp hooks/status-line.sh "$stage/hooks/"
 cp dist/agy-hud.js "$stage/dist/"
 cp docs/hud-preview.png "$stage/docs/"
@@ -140,7 +140,7 @@ GitHub release 会发布一个平台无关归档包:
 
 - `agy-hud.tar.gz`
 
-归档包应包含 `plugin.json`、`hooks/status-line.sh`、`dist/agy-hud.js`、`config.example.json`、`README.md`、`README.zh-CN.md`、`LICENSE` 以及相关文档。
+归档包应包含 `plugin.json`、`hooks/status-line.sh`、`dist/agy-hud.js`、`config.example.json`、`README.md`、`README.zh-CN.md`、`LICENSE`、`THIRD_PARTY_NOTICES.md` 以及相关文档。运行依赖已打包,无需额外安装。
 
 ## CLI
 
@@ -178,6 +178,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
   "show_git_branch": true,
   "show_cwd": true,
   "show_agent_state": true,
+  "show_cost": true,
   "show_icons": true,
   "context_value": "percent",
   "usage_value": "remaining"
@@ -190,9 +191,14 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 显示选项:
 
 - `show_agent_state`:显示来自标准输入的 `agent_state`,例如 `Idle`、`Thinking` 或 `Auth`。
+- `show_cost`:显示 Antigravity CLI 1.1.21+ 提供的会话费用 `cost.total_usd`,位于首行末尾(单行模式则在该行末尾)。`estimated: true` 时加 `~`,例如 `~$0.02`。零显示为 `$0.00`,小于 $0.001 的正数显示为 `<$0.001`;缺失、负数或非有限数不显示。HUD 不额外累加 `subagent_usd`,也不自行计算订阅扣费;该值不是账单或实际收费承诺。
 - `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。
 - `context_value`:`percent`、`tokens` 或 `both`。默认为 `percent`,即上下文显示当前输入侧窗口占用率。存在 token 总量时,百分比和进度条会由 `total_input_tokens / context_window_size` 计算,避免最近一次长输出让 HUD 跳动。
 - `usage_value`:`remaining` 或 `percent`。默认为 `remaining`,即配额文字和进度条都显示剩余量。当 Antigravity 提供 5 小时和周两个窗口时,HUD 会按顺序分开显示各自的刷新倒计时,例如 `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`。
+
+空间不足时先隐藏费用,再按原有顺序降级其他信息。中文、emoji 和组合字符按终端列宽计算,截断不会拆开字素簇。emoji 的实际外观仍取决于终端和字体。
+
+套餐徽标兼容 `Pro`、`Ultra`、`Free` 及其 `Google AI` 前缀形式。未知或缺失套餐显示 `Plan ?`,不会误标为 `Free`。
 
 ## 配额缓存
 
@@ -219,6 +225,8 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 ```
 
 刷新命令兼容两种已知的 Antigravity 本地服务形态:当前的 `agy` loopback 服务,以及旧版 `language_server --csrf_token ...` 进程,按这个顺序尝试。如果存在 CSRF token,它只会被用于 loopback `GetUserStatus` 请求。命令最终只保存下面这种脱敏缓存。正常的 `statusline` 渲染会读取该缓存,并在 active work 结束时刷新;同时保留过期缓存刷新作为兜底。如果缓存仍然看起来完全未消耗(所有模型都是 `100% left`),新的会话或 agent 状态变化也会触发一次带去抖的即时后台刷新。
+
+从 0.1.9 开始,配额刷新可复用配额缓存旁的 `quota_cache.json.server.json`(或 `<AGY_HUD_QUOTA_CACHE>.server.json`)。它只记录 PID、本地端口、进程身份(启动时间和可执行文件路径)及发现时间。每次复用前通过定向 `ps` 校验身份,省去全量进程扫描和 `lsof`;提示缓存五分钟后过期。请求失败或配额格式异常时,同一次刷新立即重新发现服务。需要 CSRF 的旧服务不写入提示缓存。配额刷新间隔、后台刷新和 working-to-idle 同帧校正均保持不变。
 
 期望的(已脱敏)缓存结构:
 

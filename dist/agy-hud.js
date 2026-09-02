@@ -6,6 +6,13 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -27,6 +34,109 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// node_modules/ansi-regex/index.js
+var require_ansi_regex = __commonJS({
+  "node_modules/ansi-regex/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = ({ onlyFirst = false } = {}) => {
+      const pattern = [
+        "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)",
+        "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))"
+      ].join("|");
+      return new RegExp(pattern, onlyFirst ? void 0 : "g");
+    };
+  }
+});
+
+// node_modules/strip-ansi/index.js
+var require_strip_ansi = __commonJS({
+  "node_modules/strip-ansi/index.js"(exports2, module2) {
+    "use strict";
+    var ansiRegex = require_ansi_regex();
+    module2.exports = (string) => typeof string === "string" ? string.replace(ansiRegex(), "") : string;
+  }
+});
+
+// node_modules/is-fullwidth-code-point/index.js
+var require_is_fullwidth_code_point = __commonJS({
+  "node_modules/is-fullwidth-code-point/index.js"(exports2, module2) {
+    "use strict";
+    var isFullwidthCodePoint = (codePoint) => {
+      if (Number.isNaN(codePoint)) {
+        return false;
+      }
+      if (codePoint >= 4352 && (codePoint <= 4447 || // Hangul Jamo
+      codePoint === 9001 || // LEFT-POINTING ANGLE BRACKET
+      codePoint === 9002 || // RIGHT-POINTING ANGLE BRACKET
+      // CJK Radicals Supplement .. Enclosed CJK Letters and Months
+      11904 <= codePoint && codePoint <= 12871 && codePoint !== 12351 || // Enclosed CJK Letters and Months .. CJK Unified Ideographs Extension A
+      12880 <= codePoint && codePoint <= 19903 || // CJK Unified Ideographs .. Yi Radicals
+      19968 <= codePoint && codePoint <= 42182 || // Hangul Jamo Extended-A
+      43360 <= codePoint && codePoint <= 43388 || // Hangul Syllables
+      44032 <= codePoint && codePoint <= 55203 || // CJK Compatibility Ideographs
+      63744 <= codePoint && codePoint <= 64255 || // Vertical Forms
+      65040 <= codePoint && codePoint <= 65049 || // CJK Compatibility Forms .. Small Form Variants
+      65072 <= codePoint && codePoint <= 65131 || // Halfwidth and Fullwidth Forms
+      65281 <= codePoint && codePoint <= 65376 || 65504 <= codePoint && codePoint <= 65510 || // Kana Supplement
+      110592 <= codePoint && codePoint <= 110593 || // Enclosed Ideographic Supplement
+      127488 <= codePoint && codePoint <= 127569 || // CJK Unified Ideographs Extension B .. Tertiary Ideographic Plane
+      131072 <= codePoint && codePoint <= 262141)) {
+        return true;
+      }
+      return false;
+    };
+    module2.exports = isFullwidthCodePoint;
+    module2.exports.default = isFullwidthCodePoint;
+  }
+});
+
+// node_modules/emoji-regex/index.js
+var require_emoji_regex = __commonJS({
+  "node_modules/emoji-regex/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = function() {
+      return /\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62(?:\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67|\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74|\uDB40\uDC77\uDB40\uDC6C\uDB40\uDC73)\uDB40\uDC7F|\uD83D\uDC68(?:\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68\uD83C\uDFFB|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFE])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D)?\uD83D\uDC68|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D[\uDC66\uDC67])|[\u2695\u2696\u2708]\uFE0F|\uD83D[\uDC66\uDC67]|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|(?:\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708])\uFE0F|\uD83C\uDFFB\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C[\uDFFB-\uDFFF])|(?:\uD83E\uDDD1\uD83C\uDFFB\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)\uD83C\uDFFB|\uD83E\uDDD1(?:\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1)|(?:\uD83E\uDDD1\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D(?:\uD83D[\uDC68\uDC69]))(?:\uD83C[\uDFFB-\uDFFE])|(?:\uD83E\uDDD1\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB\uDFFC])|\uD83D\uDC69(?:\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFD-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFB\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFC-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC\uDFFE\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D(?:\uD83D[\uDC68\uDC69])|\uD83D[\uDC68\uDC69])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD]))|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|(?:\uD83E\uDDD1\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB-\uDFFD])|\uD83D\uDC69\u200D\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D\uDC41\uFE0F\u200D\uD83D\uDDE8|\uD83D\uDC69(?:\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708]|\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\u200D[\u2695\u2696\u2708])|(?:(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)\uFE0F|\uD83D\uDC6F|\uD83E[\uDD3C\uDDDE\uDDDF])\u200D[\u2640\u2642]|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|\u200D[\u2640\u2642])|\uD83C\uDFF4\u200D\u2620)\uFE0F|\uD83D\uDC69\u200D\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|\uD83C\uDFF3\uFE0F\u200D\uD83C\uDF08|\uD83D\uDC15\u200D\uD83E\uDDBA|\uD83D\uDC69\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC67|\uD83C\uDDFD\uD83C\uDDF0|\uD83C\uDDF4\uD83C\uDDF2|\uD83C\uDDF6\uD83C\uDDE6|[#\*0-9]\uFE0F\u20E3|\uD83C\uDDE7(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEF\uDDF1-\uDDF4\uDDF6-\uDDF9\uDDFB\uDDFC\uDDFE\uDDFF])|\uD83C\uDDF9(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDED\uDDEF-\uDDF4\uDDF7\uDDF9\uDDFB\uDDFC\uDDFF])|\uD83C\uDDEA(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDED\uDDF7-\uDDFA])|\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF7(?:\uD83C[\uDDEA\uDDF4\uDDF8\uDDFA\uDDFC])|\uD83D\uDC69(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF2(?:\uD83C[\uDDE6\uDDE8-\uDDED\uDDF0-\uDDFF])|\uD83C\uDDE6(?:\uD83C[\uDDE8-\uDDEC\uDDEE\uDDF1\uDDF2\uDDF4\uDDF6-\uDDFA\uDDFC\uDDFD\uDDFF])|\uD83C\uDDF0(?:\uD83C[\uDDEA\uDDEC-\uDDEE\uDDF2\uDDF3\uDDF5\uDDF7\uDDFC\uDDFE\uDDFF])|\uD83C\uDDED(?:\uD83C[\uDDF0\uDDF2\uDDF3\uDDF7\uDDF9\uDDFA])|\uD83C\uDDE9(?:\uD83C[\uDDEA\uDDEC\uDDEF\uDDF0\uDDF2\uDDF4\uDDFF])|\uD83C\uDDFE(?:\uD83C[\uDDEA\uDDF9])|\uD83C\uDDEC(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEE\uDDF1-\uDDF3\uDDF5-\uDDFA\uDDFC\uDDFE])|\uD83C\uDDF8(?:\uD83C[\uDDE6-\uDDEA\uDDEC-\uDDF4\uDDF7-\uDDF9\uDDFB\uDDFD-\uDDFF])|\uD83C\uDDEB(?:\uD83C[\uDDEE-\uDDF0\uDDF2\uDDF4\uDDF7])|\uD83C\uDDF5(?:\uD83C[\uDDE6\uDDEA-\uDDED\uDDF0-\uDDF3\uDDF7-\uDDF9\uDDFC\uDDFE])|\uD83C\uDDFB(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDEE\uDDF3\uDDFA])|\uD83C\uDDF3(?:\uD83C[\uDDE6\uDDE8\uDDEA-\uDDEC\uDDEE\uDDF1\uDDF4\uDDF5\uDDF7\uDDFA\uDDFF])|\uD83C\uDDE8(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDEE\uDDF0-\uDDF5\uDDF7\uDDFA-\uDDFF])|\uD83C\uDDF1(?:\uD83C[\uDDE6-\uDDE8\uDDEE\uDDF0\uDDF7-\uDDFB\uDDFE])|\uD83C\uDDFF(?:\uD83C[\uDDE6\uDDF2\uDDFC])|\uD83C\uDDFC(?:\uD83C[\uDDEB\uDDF8])|\uD83C\uDDFA(?:\uD83C[\uDDE6\uDDEC\uDDF2\uDDF3\uDDF8\uDDFE\uDDFF])|\uD83C\uDDEE(?:\uD83C[\uDDE8-\uDDEA\uDDF1-\uDDF4\uDDF6-\uDDF9])|\uD83C\uDDEF(?:\uD83C[\uDDEA\uDDF2\uDDF4\uDDF5])|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:\uD83C[\uDFFB-\uDFFF])|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u261D\u270A-\u270D]|\uD83C[\uDF85\uDFC2\uDFC7]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66\uDC67\uDC6B-\uDC6D\uDC70\uDC72\uDC74-\uDC76\uDC78\uDC7C\uDC83\uDC85\uDCAA\uDD74\uDD7A\uDD90\uDD95\uDD96\uDE4C\uDE4F\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1C\uDD1E\uDD1F\uDD30-\uDD36\uDDB5\uDDB6\uDDBB\uDDD2-\uDDD5])(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u231A\u231B\u23E9-\u23EC\u23F0\u23F3\u25FD\u25FE\u2614\u2615\u2648-\u2653\u267F\u2693\u26A1\u26AA\u26AB\u26BD\u26BE\u26C4\u26C5\u26CE\u26D4\u26EA\u26F2\u26F3\u26F5\u26FA\u26FD\u2705\u270A\u270B\u2728\u274C\u274E\u2753-\u2755\u2757\u2795-\u2797\u27B0\u27BF\u2B1B\u2B1C\u2B50\u2B55]|\uD83C[\uDC04\uDCCF\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE1A\uDE2F\uDE32-\uDE36\uDE38-\uDE3A\uDE50\uDE51\uDF00-\uDF20\uDF2D-\uDF35\uDF37-\uDF7C\uDF7E-\uDF93\uDFA0-\uDFCA\uDFCF-\uDFD3\uDFE0-\uDFF0\uDFF4\uDFF8-\uDFFF]|\uD83D[\uDC00-\uDC3E\uDC40\uDC42-\uDCFC\uDCFF-\uDD3D\uDD4B-\uDD4E\uDD50-\uDD67\uDD7A\uDD95\uDD96\uDDA4\uDDFB-\uDE4F\uDE80-\uDEC5\uDECC\uDED0-\uDED2\uDED5\uDEEB\uDEEC\uDEF4-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])|(?:[#\*0-9\xA9\xAE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23E9-\u23F3\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u2604\u260E\u2611\u2614\u2615\u2618\u261D\u2620\u2622\u2623\u2626\u262A\u262E\u262F\u2638-\u263A\u2640\u2642\u2648-\u2653\u265F\u2660\u2663\u2665\u2666\u2668\u267B\u267E\u267F\u2692-\u2697\u2699\u269B\u269C\u26A0\u26A1\u26AA\u26AB\u26B0\u26B1\u26BD\u26BE\u26C4\u26C5\u26C8\u26CE\u26CF\u26D1\u26D3\u26D4\u26E9\u26EA\u26F0-\u26F5\u26F7-\u26FA\u26FD\u2702\u2705\u2708-\u270D\u270F\u2712\u2714\u2716\u271D\u2721\u2728\u2733\u2734\u2744\u2747\u274C\u274E\u2753-\u2755\u2757\u2763\u2764\u2795-\u2797\u27A1\u27B0\u27BF\u2934\u2935\u2B05-\u2B07\u2B1B\u2B1C\u2B50\u2B55\u3030\u303D\u3297\u3299]|\uD83C[\uDC04\uDCCF\uDD70\uDD71\uDD7E\uDD7F\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE02\uDE1A\uDE2F\uDE32-\uDE3A\uDE50\uDE51\uDF00-\uDF21\uDF24-\uDF93\uDF96\uDF97\uDF99-\uDF9B\uDF9E-\uDFF0\uDFF3-\uDFF5\uDFF7-\uDFFF]|\uD83D[\uDC00-\uDCFD\uDCFF-\uDD3D\uDD49-\uDD4E\uDD50-\uDD67\uDD6F\uDD70\uDD73-\uDD7A\uDD87\uDD8A-\uDD8D\uDD90\uDD95\uDD96\uDDA4\uDDA5\uDDA8\uDDB1\uDDB2\uDDBC\uDDC2-\uDDC4\uDDD1-\uDDD3\uDDDC-\uDDDE\uDDE1\uDDE3\uDDE8\uDDEF\uDDF3\uDDFA-\uDE4F\uDE80-\uDEC5\uDECB-\uDED2\uDED5\uDEE0-\uDEE5\uDEE9\uDEEB\uDEEC\uDEF0\uDEF3-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])\uFE0F|(?:[\u261D\u26F9\u270A-\u270D]|\uD83C[\uDF85\uDFC2-\uDFC4\uDFC7\uDFCA-\uDFCC]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66-\uDC78\uDC7C\uDC81-\uDC83\uDC85-\uDC87\uDC8F\uDC91\uDCAA\uDD74\uDD75\uDD7A\uDD90\uDD95\uDD96\uDE45-\uDE47\uDE4B-\uDE4F\uDEA3\uDEB4-\uDEB6\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1F\uDD26\uDD30-\uDD39\uDD3C-\uDD3E\uDDB5\uDDB6\uDDB8\uDDB9\uDDBB\uDDCD-\uDDCF\uDDD1-\uDDDD])/g;
+    };
+  }
+});
+
+// node_modules/string-width/index.js
+var require_string_width = __commonJS({
+  "node_modules/string-width/index.js"(exports2, module2) {
+    "use strict";
+    var stripAnsi2 = require_strip_ansi();
+    var isFullwidthCodePoint = require_is_fullwidth_code_point();
+    var emojiRegex = require_emoji_regex();
+    var stringWidth2 = (string) => {
+      if (typeof string !== "string" || string.length === 0) {
+        return 0;
+      }
+      string = stripAnsi2(string);
+      if (string.length === 0) {
+        return 0;
+      }
+      string = string.replace(emojiRegex(), "  ");
+      let width = 0;
+      for (let i = 0; i < string.length; i++) {
+        const code = string.codePointAt(i);
+        if (code <= 31 || code >= 127 && code <= 159) {
+          continue;
+        }
+        if (code >= 768 && code <= 879) {
+          continue;
+        }
+        if (code > 65535) {
+          i++;
+        }
+        width += isFullwidthCodePoint(code) ? 2 : 1;
+      }
+      return width;
+    };
+    module2.exports = stringWidth2;
+    module2.exports.default = stringWidth2;
+  }
+});
 
 // src/main.ts
 var main_exports = {};
@@ -56,6 +166,7 @@ function defaultConfig() {
     showGitBranch: true,
     showCWD: true,
     showAgentState: true,
+    showCost: true,
     showIcons: true,
     contextValue: "percent",
     usageValue: "remaining",
@@ -86,6 +197,7 @@ function merge(base, patch) {
   if (typeof patch.show_git_branch === "boolean") base.showGitBranch = patch.show_git_branch;
   if (typeof patch.show_cwd === "boolean") base.showCWD = patch.show_cwd;
   if (typeof patch.show_agent_state === "boolean") base.showAgentState = patch.show_agent_state;
+  if (typeof patch.show_cost === "boolean") base.showCost = patch.show_cost;
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
@@ -234,15 +346,24 @@ function buildQuotaCache(rawResponse, now) {
   return { cache, summary: lines.join("\n") };
 }
 async function refreshQuota(cachePath, runtime = defaultRuntime()) {
+  const hint = loadServerHint(cachePath, runtime);
+  if (hint) {
+    const raw = await tryRequest(runtime, hint.port, "");
+    const built = buildQuotaCache(raw, runtime.now());
+    if (built) return saveQuotaCache(cachePath, built, runtime);
+    saveServerHint(cachePath, null, runtime);
+  }
   const psOutput = runtime.ps();
   const languageServer = parseLanguageServerInfo(psOutput);
   const candidates = [...parseAgyServerInfos(psOutput), ...languageServer ? [languageServer] : []];
   if (candidates.length === 0) {
     return { ok: false, message: "No running language_server or agy quota server found." };
   }
-  let rawResponse = null;
   let sawPort = false;
+  let sawResponse = false;
   for (const info of candidates) {
+    const identity = info.kind === "agy" ? processIdentity(runtime, info.pid) : null;
+    if (info.kind === "agy" && runtime.processIdentity && !identity) continue;
     let ports;
     try {
       ports = parseListeningPorts(runtime.lsof(info.pid));
@@ -253,25 +374,27 @@ async function refreshQuota(cachePath, runtime = defaultRuntime()) {
       sawPort = true;
     }
     for (const port of ports) {
-      rawResponse = await runtime.request(port, info.csrfToken);
-      if (rawResponse) {
-        break;
+      const rawResponse = await tryRequest(runtime, port, info.csrfToken);
+      if (rawResponse) sawResponse = true;
+      const built = buildQuotaCache(rawResponse, runtime.now());
+      if (built) {
+        const result = saveQuotaCache(cachePath, built, runtime);
+        if (identity) {
+          saveServerHint(cachePath, { pid: info.pid, port, identity, discoveredAt: runtime.now().toISOString() }, runtime);
+        }
+        return result;
       }
-    }
-    if (rawResponse) {
-      break;
     }
   }
   if (!sawPort) {
     return { ok: false, message: "No listening ports found on quota server." };
   }
-  if (!rawResponse) {
+  if (!sawResponse) {
     return { ok: false, message: "Failed to query GetUserStatus from all identified ports." };
   }
-  const built = buildQuotaCache(rawResponse, runtime.now());
-  if (!built) {
-    return { ok: false, message: "GetUserStatus returned malformed quota data." };
-  }
+  return { ok: false, message: "GetUserStatus returned malformed quota data." };
+}
+function saveQuotaCache(cachePath, built, runtime) {
   runtime.mkdir(import_node_path.default.dirname(cachePath));
   runtime.writeFile(cachePath, `${JSON.stringify(built.cache, null, 2)}
 `);
@@ -282,12 +405,56 @@ async function refreshQuota(cachePath, runtime = defaultRuntime()) {
     summary: built.summary
   };
 }
+function loadServerHint(cachePath, runtime) {
+  try {
+    const raw = runtime.readFile?.(`${cachePath}.server.json`);
+    if (!raw || raw.length > 4096) return null;
+    const hint = JSON.parse(raw);
+    if (!hint || typeof hint.pid !== "string" || !/^[1-9]\d{0,9}$/.test(hint.pid) || Number(hint.pid) > 2147483647 || !Number.isInteger(hint.port) || hint.port < 1 || hint.port > 65535 || typeof hint.identity !== "string" || hint.identity === "" || typeof hint.discoveredAt !== "string") return null;
+    const age = runtime.now().getTime() - Date.parse(hint.discoveredAt);
+    if (!Number.isFinite(age) || age < 0 || age >= 5 * 60 * 1e3) return null;
+    return processIdentity(runtime, hint.pid) === hint.identity ? hint : null;
+  } catch {
+    return null;
+  }
+}
+function processIdentity(runtime, pid) {
+  try {
+    return runtime.processIdentity?.(pid) || null;
+  } catch {
+    return null;
+  }
+}
+function saveServerHint(cachePath, hint, runtime) {
+  try {
+    runtime.writeFile(`${cachePath}.server.json`, `${JSON.stringify(hint)}
+`);
+  } catch {
+  }
+}
+async function tryRequest(runtime, port, csrfToken) {
+  try {
+    return await runtime.request(port, csrfToken);
+  } catch {
+    return null;
+  }
+}
 function defaultRuntime() {
   return {
     ps: () => (0, import_node_child_process.execFileSync)("ps", ["aux"], { encoding: "utf8" }),
     lsof: (pid) => (0, import_node_child_process.execFileSync)("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8" }),
     request: queryLanguageServer,
     now: () => /* @__PURE__ */ new Date(),
+    readFile: (filePath) => import_node_fs3.default.readFileSync(filePath, "utf8"),
+    processIdentity: (pid) => {
+      const identity = (0, import_node_child_process.execFileSync)("ps", ["-p", pid, "-o", "lstart=", "-o", "comm="], {
+        encoding: "utf8",
+        timeout: 1e3,
+        env: { ...process.env, LC_ALL: "C" }
+      }).trim();
+      const match = identity.match(/^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+(.+)$/);
+      return match && import_node_path.default.basename(match[1]) === "agy" ? identity : null;
+    },
     // The cache carries a masked email, plan name, and per-model quota, so keep it private instead
     // of leaving it world-readable under the default umask.
     writeFile: (filePath, data) => import_node_fs3.default.writeFileSync(filePath, data, { encoding: "utf8", mode: 384 }),
@@ -445,11 +612,25 @@ function parseHEAD(head) {
 }
 
 // src/ansi.ts
+var import_string_width = __toESM(require_string_width());
+var import_strip_ansi = __toESM(require_strip_ansi());
+var graphemes = new Intl.Segmenter(void 0, { granularity: "grapheme" });
 function strip(input) {
-  return input.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  return (0, import_strip_ansi.default)(input);
 }
 function visibleLen(input) {
-  return Array.from(strip(input)).length;
+  return (0, import_string_width.default)(strip(input));
+}
+function truncateColumns(input, width) {
+  let result = "";
+  let columns = 0;
+  for (const { segment } of graphemes.segment(strip(input))) {
+    const next = visibleLen(segment);
+    if (columns + next > width) break;
+    result += segment;
+    columns += next;
+  }
+  return result;
 }
 
 // src/statusline.ts
@@ -471,11 +652,27 @@ function shortModelName(display) {
   short = short.split(")").join("");
   short = short.split("Medium").join("Med");
   short = short.trim().split(/\s+/).filter(Boolean).join(" ");
-  const runes = Array.from(short);
-  if (runes.length > 18) {
-    short = `${runes.slice(0, 15).join("")}...`;
+  if (visibleLen(short) > 18) {
+    short = `${truncateColumns(short, 15)}...`;
   }
   return short;
+}
+function formatCost(usd) {
+  if (!Number.isFinite(usd) || usd <= 0) {
+    return "$0.00";
+  }
+  if (usd >= 0.01) {
+    return `$${usd.toFixed(2)}`;
+  }
+  if (usd >= 1e-3) {
+    return `$${usd.toFixed(3)}`;
+  }
+  return "<$0.001";
+}
+function renderCost(cost, config) {
+  const usd = cost?.total_usd;
+  if (!config.showCost || typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) return "";
+  return colorize(`${cost?.estimated === true ? "~" : ""}${formatCost(usd)}`, colorCyan, config.color);
 }
 function render(payload, opts) {
   const config = opts.config;
@@ -500,9 +697,14 @@ function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, br
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   line1Parts.push(stateText);
-  let line1 = joinHeader(...line1Parts);
+  const costText = renderCost(payload.cost, config);
+  let line1 = joinHeader(...line1Parts, costText);
   if (visibleLen(line1) > width) {
-    line1 = joinHeader(colorize(modelSegment, colorBlue, config.color), colorize(renderGitSegment(branch2, config), colorMagenta, config.color), stateText);
+    line1 = joinHeader(...line1Parts);
+  }
+  if (visibleLen(line1) > width) {
+    const git = config.showGitBranch && branch2 !== "" ? colorize(renderGitSegment(branch2, config), colorMagenta, config.color) : "";
+    line1 = joinHeader(colorize(modelSegment, colorBlue, config.color), git, stateText);
   }
   if (visibleLen(line1) > width) {
     line1 = joinHeader(colorize(modelSegment, colorBlue, config.color), stateText);
@@ -576,11 +778,13 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
     usage2 = colorize(text, colorMuted, config.color);
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
+  const costText = renderCost(payload.cost, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
+    [coloredBadge, ctx, tokens, bar, usage2, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText],
     [coloredBadge, ctx, bar, usage2, stateText],
     [coloredBadge, ctx, usage2, stateText],
@@ -597,12 +801,9 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
   return fit(`${formatInt(ctxPct)}% ${stateLabel}`, width);
 }
 function renderModelSegment(shortModel, rawPlan, config) {
-  let plan = "Plan ?";
-  if (rawPlan === "Google AI Pro") {
-    plan = "Pro";
-  } else if (rawPlan !== "") {
-    plan = "Free";
-  }
+  const trimmed = rawPlan.trim();
+  const knownTier = trimmed.match(/^(?:Google AI\s+)?(Pro|Ultra|Free)$/i);
+  const plan = knownTier ? title(knownTier[1]) : "Plan ?";
   if (config.showModel && shortModel !== "") {
     return `${withIcon(config, "\uEE9C ", "")}${shortModel} | ${renderPlan(plan, config)}`;
   }
@@ -912,7 +1113,7 @@ function fit(input, width) {
   if (width <= 0 || visibleLen(input) <= width) {
     return input;
   }
-  return Array.from(strip(input)).slice(0, width).join("");
+  return truncateColumns(input, width);
 }
 function clampInt(n) {
   if (n < 0) return 0;
@@ -944,7 +1145,7 @@ function title(raw) {
 }
 
 // src/main.ts
-var version = "0.1.8";
+var version = "0.1.9";
 var consumedQuotaRefreshMs = 15 * 1e3;
 var untouchedQuotaRefreshMs = 30 * 1e3;
 function renderStatusline(input, cfg = defaultConfig(), cache = null) {

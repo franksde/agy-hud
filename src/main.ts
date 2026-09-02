@@ -8,7 +8,7 @@ import { RefreshResult, refreshQuota } from "./quotaProbe";
 import { branch as gitBranch } from "./gitinfo";
 import { Payload, render } from "./statusline";
 
-export const version = "0.1.8";
+export const version = "0.1.9";
 
 const consumedQuotaRefreshMs = 15 * 1000;
 const untouchedQuotaRefreshMs = 30 * 1000;

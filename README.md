@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer, verified through 1.1.13. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Antigravity CLI 1.1.0 or newer, verified through 1.1.24. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 
@@ -45,7 +45,7 @@ npm ci && npm run build && npm test
 
 stage=$(mktemp -d)/agy-hud
 mkdir -p "$stage/hooks" "$stage/dist" "$stage/docs"
-cp plugin.json config.example.json README.md README.zh-CN.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
+cp plugin.json config.example.json README.md README.zh-CN.md LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
 cp hooks/status-line.sh "$stage/hooks/"
 cp dist/agy-hud.js "$stage/dist/"
 cp docs/hud-preview.png "$stage/docs/"
@@ -141,7 +141,7 @@ GitHub releases are expected to publish one platform-independent archive:
 
 - `agy-hud.tar.gz`
 
-The archive should contain `plugin.json`, `hooks/status-line.sh`, `dist/agy-hud.js`, `config.example.json`, `README.md`, `README.zh-CN.md`, `LICENSE`, and supporting docs.
+The archive should contain `plugin.json`, `hooks/status-line.sh`, `dist/agy-hud.js`, `config.example.json`, `README.md`, `README.zh-CN.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and supporting docs. Runtime dependencies are bundled, so no extra installation is required.
 
 ## CLI
 
@@ -179,6 +179,7 @@ Default config:
   "show_git_branch": true,
   "show_cwd": true,
   "show_agent_state": true,
+  "show_cost": true,
   "show_icons": true,
   "context_value": "percent",
   "usage_value": "remaining"
@@ -191,9 +192,14 @@ When workspace paths are available, git branch display is resolved from the curr
 Display options:
 
 - `show_agent_state`: shows stdin `agent_state` such as `Idle`, `Thinking`, or `Auth`.
+- `show_cost`: shows the session cost supplied as `cost.total_usd` by Antigravity CLI 1.1.21+, at the end of the top line (or the single line). `estimated: true` adds `~`, for example `~$0.02`. Zero displays as `$0.00`, positive amounts below $0.001 as `<$0.001`; missing, negative or non-finite values are omitted. The HUD does not separately add `subagent_usd` or calculate subscription charges; this is not an invoice or a promise of actual billing.
 - `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.
 - `usage_value`: `remaining` or `percent`. Default is `remaining`, so quota text and bar show what is left. When Antigravity provides both windows, the HUD shows them separately with per-window reset durations, for example `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`.
+
+Cost is hidden before any existing segment when space is tight; the remaining layout then follows the usual degradation order. CJK, emoji and combining marks are measured in terminal columns, and clipping does not split grapheme clusters. Exact emoji appearance still depends on your terminal and font.
+
+Plan badges recognize `Pro`, `Ultra`, `Free` and their `Google AI`-prefixed forms. Unknown or missing tiers show `Plan ?`, not `Free`.
 
 ## Quota Cache
 
@@ -222,6 +228,8 @@ node <plugin-root>/dist/agy-hud.js quota refresh
 ```
 
 The refresh command supports both known Antigravity local-server shapes: the current `agy` loopback server and the older `language_server --csrf_token ...` process, in that order. If a CSRF token is present, it is used only for the loopback `GetUserStatus` request. The command stores only the sanitized cache shape below. Normal `statusline` rendering reads this cache and refreshes it when active work settles. It also uses stale-cache refreshes as a fallback. If the cache still looks untouched (`100% left` for every model), status-line activity such as a new conversation or agent state change can trigger an immediate debounced background refresh.
+
+Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to the quota cache (or `<AGY_HUD_QUOTA_CACHE>.server.json`). It holds only a PID, local port, process identity (start time and executable path), and discovery timestamp. Each reuse checks the process identity with a targeted `ps` call, avoiding a full process scan and `lsof`; hints expire after five minutes. Failure or malformed quota causes discovery in the same refresh. Legacy servers requiring CSRF are never cached in this hint. Quota refresh intervals, background refreshes and working-to-idle same-frame correction are unchanged.
 
 Expected sanitized cache shape:
 

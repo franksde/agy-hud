@@ -40,7 +40,7 @@ jobs:
         run: |
           package="agy-hud"
           mkdir -p "release/${package}/hooks" "release/${package}/dist" "release/${package}/docs"
-          cp plugin.json config.example.json README.md README.zh-CN.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md "release/${package}/"
+          cp plugin.json config.example.json README.md README.zh-CN.md LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CONTRIBUTING.md CHANGELOG.md "release/${package}/"
           cp hooks/status-line.sh "release/${package}/hooks/"
           cp dist/agy-hud.js "release/${package}/dist/"
           cp docs/hud-preview.png "release/${package}/docs/"

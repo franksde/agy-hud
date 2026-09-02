@@ -14,6 +14,7 @@ test("default config matches open-source defaults", () => {
   assert.equal(got.showGitBranch, true);
   assert.equal(got.showCWD, true);
   assert.equal(got.showAgentState, true);
+  assert.equal(got.showCost, true);
   assert.equal(got.showIcons, true);
   assert.equal(got.debug, false);
   assert.equal(got.contextValue, "percent");
@@ -46,6 +47,13 @@ test("load falls back on invalid JSON", () => {
   fs.writeFileSync(configPath, "not json");
 
   assert.deepEqual(loadFromPaths([configPath]), defaultConfig());
+});
+
+test("show_cost false is honored from config JSON", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-"));
+  const configPath = path.join(dir, "config.json");
+  fs.writeFileSync(configPath, JSON.stringify({ show_cost: false }));
+  assert.equal(loadFromPaths([configPath]).showCost, false);
 });
 
 test("load uses first existing path", () => {

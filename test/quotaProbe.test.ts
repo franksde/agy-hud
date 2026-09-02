@@ -270,3 +270,108 @@ function sampleRawStatus(label: string, remainingFraction: number): unknown {
     }
   };
 }
+
+function hintRuntime() {
+  const files: Record<string, string> = {};
+  const calls = { ps: 0, lsof: 0, requests: [] as number[] };
+  const runtime = {
+    ps: () => { calls.ps++; return "user 222 0.0 /opt/bin/agy"; },
+    lsof: (_pid: string) => { calls.lsof++; return "agy 222 user 9u IPv4 0 TCP 127.0.0.1:2222 (LISTEN)"; },
+    processIdentity: (_pid: string): string | null => "Tue May 19 12:00:00 2026 /opt/bin/agy",
+    request: async (port: number, csrfToken: string): Promise<unknown> => {
+      calls.requests.push(port);
+      assert.equal(csrfToken, "");
+      return sampleRawStatus("Gemini 3.8 Flash (High)", 0.4);
+    },
+    now: () => new Date("2026-05-20T04:00:00Z"),
+    readFile: (filePath: string) => files[filePath] ?? "",
+    writeFile: (filePath: string, data: string) => { files[filePath] = data; },
+    mkdir: (_dir: string) => {}
+  };
+  return { runtime, files, calls };
+}
+
+test("a validated server hint skips discovery but still refreshes quota every call", async () => {
+  const { runtime, files, calls } = hintRuntime();
+  const cachePath = "/tmp/quota-hint-test.json";
+  assert.equal((await refreshQuota(cachePath, runtime)).ok, true);
+  const hint = JSON.parse(files[`${cachePath}.server.json`] ?? "null");
+  assert.deepEqual(hint, {
+    pid: "222", port: 2222, identity: "Tue May 19 12:00:00 2026 /opt/bin/agy",
+    discoveredAt: "2026-05-20T04:00:00.000Z"
+  });
+  assert.equal((await refreshQuota(cachePath, runtime)).ok, true);
+  assert.equal(calls.ps, 1);
+  assert.equal(calls.lsof, 1);
+  assert.deepEqual(calls.requests, [2222, 2222]);
+  assert.match(files[cachePath], /"remainingFraction": 0.4/);
+});
+
+test("a dead or reused PID never receives a cached-port request", async () => {
+  for (const identity of [null, "Wed May 20 03:00:00 2026 /opt/bin/agy"]) {
+    const { runtime, files, calls } = hintRuntime();
+    const cachePath = "/tmp/quota-restart-test.json";
+    await refreshQuota(cachePath, runtime);
+    calls.requests.length = 0;
+    runtime.processIdentity = () => identity;
+    runtime.ps = () => { calls.ps++; return ""; };
+    const result = await refreshQuota(cachePath, runtime);
+    assert.equal(result.ok, false);
+    assert.deepEqual(calls.requests, []);
+    assert.equal(calls.ps, 2);
+    assert.ok(files[cachePath]);
+  }
+});
+
+test("failed or malformed cached replies rediscover a working server in the same refresh", async () => {
+  for (const reply of [null, { notUserStatus: true }]) {
+    const { runtime, files, calls } = hintRuntime();
+    const cachePath = "/tmp/quota-fallback-test.json";
+    await refreshQuota(cachePath, runtime);
+    calls.requests.length = 0;
+    runtime.lsof = () => { calls.lsof++; return "agy 222 user 9u IPv4 0 TCP 127.0.0.1:3333 (LISTEN)"; };
+    runtime.request = async port => {
+      calls.requests.push(port);
+      return port === 2222 ? reply : sampleRawStatus("Gemini 3.8 Flash (High)", 0.2);
+    };
+    assert.equal((await refreshQuota(cachePath, runtime)).ok, true);
+    assert.deepEqual(calls.requests, [2222, 3333]);
+    assert.equal(JSON.parse(files[`${cachePath}.server.json`]).port, 3333);
+    assert.match(files[cachePath], /"remainingFraction": 0.2/);
+  }
+});
+
+test("invalid and expired hints are ignored without trying their port", async () => {
+  const valid = { pid: "222", port: 4444, identity: "Tue May 19 12:00:00 2026 /opt/bin/agy", discoveredAt: "2026-05-20T04:00:00.000Z" };
+  for (const raw of ["{broken", "null", JSON.stringify({ ...valid, port: -1 }), JSON.stringify({ ...valid, port: 65536 }),
+    JSON.stringify({ ...valid, pid: "-1;pwd" }), JSON.stringify({ ...valid, discoveredAt: "2026-05-20T03:54:59Z" }),
+    JSON.stringify({ ...valid, discoveredAt: "2026-05-20T05:00:00Z" })]) {
+    const { runtime, files, calls } = hintRuntime();
+    files["/tmp/quota-invalid-test.json.server.json"] = raw;
+    assert.equal((await refreshQuota("/tmp/quota-invalid-test.json", runtime)).ok, true);
+    assert.deepEqual(calls.requests, [2222]);
+  }
+});
+
+test("hint storage failures do not prevent publishing fresh quota", async () => {
+  const { runtime, files, calls } = hintRuntime();
+  runtime.readFile = () => { throw new Error("unreadable hint"); };
+  runtime.writeFile = (filePath, data) => {
+    if (filePath.endsWith(".server.json")) throw new Error("hint write denied");
+    files[filePath] = data;
+  };
+  assert.equal((await refreshQuota("/tmp/quota-write-test.json", runtime)).ok, true);
+  assert.deepEqual(calls.requests, [2222]);
+  assert.match(files["/tmp/quota-write-test.json"], /"remainingFraction": 0.4/);
+});
+
+test("discovery continues past a listener returning non-quota JSON", async () => {
+  const { runtime, calls } = hintRuntime();
+  runtime.lsof = () => "agy 222 user 9u IPv4 0 TCP 127.0.0.1:1111 (LISTEN)\nagy 222 user 9u IPv4 0 TCP 127.0.0.1:2222 (LISTEN)";
+  runtime.request = async port => {
+    calls.requests.push(port);
+    return port === 1111 ? { unrelated: true } : sampleRawStatus("Gemini 3.8 Flash (High)", 0.4);
+  };
+  assert.equal((await refreshQuota("/tmp/quota-multi-port-test.json", runtime)).ok, true);
+  assert.deepEqual(calls.requests, [1111, 2222]);
+});
