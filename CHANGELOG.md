@@ -1,7 +1,8 @@
 # Changelog
 
-## 0.1.10
+## 0.1.10 — 2026-09-04
 
+- Updated verified compatibility with Antigravity CLI through 1.1.26, covering install, status-line wiring, rendering and the loopback quota probe.
 - Added `doctor`, a read-only self-check: Node version, the command the CLI has wired to its status line, the config file in effect and the resolved `show_icons`, the detected terminal, whether the session is remote, a heuristic Nerd Font scan, and an icon probe. `doctor --json` prints the same report machine-readably for agents verifying an install they just performed.
 - The font scan is reported as a hint and never as a verdict, in both directions: an installed Nerd Font is not necessarily the family the terminal draws with, and Ghostty, WezTerm and kitty ship their own glyph fallback, so a scan that finds nothing can still render every icon. Nothing in the HUD can observe what a terminal actually drew, so the probe needs a person to read it.
 - `doctor` names the config file already in effect when it suggests turning icons off. A `config.json` next to the bundle outranks the one under `~/.config`, so suggesting the home path while such a file exists would have handed users an edit the HUD never reads. Both READMEs carry the same warning.
