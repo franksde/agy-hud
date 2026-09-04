@@ -7,11 +7,13 @@ import { Readable } from "node:stream";
 import { strip } from "../src/ansi";
 import { defaultConfig } from "../src/config";
 import {
+  doctorDepsFromEnv,
   quotaCacheNeedsRefresh,
   quotaCacheReadCandidates,
   quotaCacheWritePath,
   renderStatusline,
-  runCli
+  runCli,
+  version
 } from "../src/main";
 import { execFileSync } from "node:child_process";
 
@@ -984,4 +986,84 @@ test("statusline renders refreshed quota on the same idle transition", async () 
     if (oldCacheEnv === undefined) delete process.env.AGY_HUD_QUOTA_CACHE;
     else process.env.AGY_HUD_QUOTA_CACHE = oldCacheEnv;
   }
+});
+
+test("doctor prints a human report and exits zero", async () => {
+  let out = "";
+  let err = "";
+  const code = await runCli(["doctor"], {
+    stdout: chunk => {
+      out += chunk;
+    },
+    stderr: chunk => {
+      err += chunk;
+    },
+    doctorDeps: {
+      homedir: "/home/u",
+      env: { TERM_PROGRAM: "iTerm.app" },
+      configPaths: [],
+      readFile: () => null,
+      listDir: () => []
+    }
+  });
+  assert.equal(code, 0);
+  assert.equal(err, "");
+  assert.match(out, /agy-hud doctor/);
+  assert.match(out, /Icon probe/);
+  assert.match(out, /"show_icons": false/);
+});
+
+test("doctor --json emits a machine-readable report for agents", async () => {
+  let out = "";
+  const code = await runCli(["doctor", "--json"], {
+    stdout: chunk => {
+      out += chunk;
+    },
+    stderr: () => {},
+    doctorDeps: {
+      homedir: "/home/u",
+      env: { SSH_CONNECTION: "10.0.0.2 51000 10.0.0.9 22" },
+      configPaths: ["/home/u/.config/agy-hud/config.json"],
+      readFile: p => (p === "/home/u/.config/agy-hud/config.json" ? '{"show_icons": false}' : null),
+      listDir: () => []
+    }
+  });
+  assert.equal(code, 0);
+  const report = JSON.parse(out);
+  assert.equal(report.showIcons, false);
+  assert.equal(report.remoteSession, true);
+  assert.equal(report.configPath, "/home/u/.config/agy-hud/config.json");
+  assert.equal(report.version, version);
+});
+
+test("doctor rejects unknown flags instead of silently ignoring them", async () => {
+  let err = "";
+  const code = await runCli(["doctor", "--nope"], {
+    stdout: () => {},
+    stderr: chunk => {
+      err += chunk;
+    }
+  });
+  assert.equal(code, 2);
+  assert.match(err, /usage/);
+});
+
+test("usage lists doctor so it is discoverable", async () => {
+  let err = "";
+  await runCli(["help"], {
+    stdout: () => {},
+    stderr: chunk => {
+      err += chunk;
+    }
+  });
+  assert.match(err, /doctor/);
+});
+
+test("doctorDepsFromEnv reads the real environment without throwing", () => {
+  const deps = doctorDepsFromEnv();
+  assert.equal(deps.version, version);
+  assert.equal(deps.nodeVersion, process.version);
+  assert.ok(deps.configPaths.length > 0);
+  assert.deepEqual(deps.listDir("/definitely/not/a/font/dir"), []);
+  assert.equal(deps.readFile("/definitely/not/a/file.json"), null);
 });

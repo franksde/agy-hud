@@ -1,14 +1,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { defaultConfig, loadFromPaths, Config } from "./config";
 import { Cache, load as loadQuota, matchModel } from "./quota";
 import { RefreshResult, refreshQuota } from "./quotaProbe";
 import { branch as gitBranch } from "./gitinfo";
 import { Payload, render } from "./statusline";
+import { DoctorDeps, collectDoctorReport, formatDoctorReport } from "./doctor";
 
-export const version = "0.1.9";
+export const version = "0.1.10";
 
 const consumedQuotaRefreshMs = 15 * 1000;
 const untouchedQuotaRefreshMs = 30 * 1000;
@@ -71,6 +72,21 @@ export function configPaths(): string[] {
     paths.push(path.join(home, ".config", "agy-hud", "config.json"));
   }
   return paths;
+}
+
+// The user-level config file to create when none exists yet. It is the first user-level entry
+// configPaths() produces, so a custom XDG_CONFIG_HOME is honoured instead of being shadowed by a
+// suggestion to write $HOME/.config, which the loader would only reach second.
+export function userConfigPath(): string {
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg) {
+    return path.join(xdg, "agy-hud", "config.json");
+  }
+  const home = os.homedir();
+  if (home) {
+    return path.join(home, ".config", "agy-hud", "config.json");
+  }
+  return "";
 }
 
 export function quotaCacheWritePath(): string {
@@ -192,10 +208,54 @@ interface CliDeps {
   stdout?: WriteFn;
   stderr?: WriteFn;
   refreshQuota?: (cachePath: string) => Promise<RefreshResult>;
+  doctorDeps?: Partial<DoctorDeps>;
 }
 
 function usage(write: WriteFn): void {
-  write("usage: agy-hud [statusline|quota refresh|version]\n");
+  write("usage: agy-hud [statusline|quota refresh|doctor [--json]|version]\n");
+}
+
+// Font discovery is the only part of doctor that shells out, and only on Linux. A missing or
+// failing fc-list is reported as "unknown", never as a missing font: the scan is a hint, and a
+// wrong negative would push users toward a font install they may not need.
+function fcList(): string | null {
+  try {
+    return execFileSync("fc-list", [":", "family"], {
+      encoding: "utf8",
+      timeout: 3000,
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function doctorDepsFromEnv(): DoctorDeps {
+  return {
+    version,
+    nodeVersion: process.version,
+    platform: process.platform,
+    env: process.env,
+    homedir: os.homedir(),
+    configPaths: configPaths(),
+    userConfigPath: userConfigPath(),
+    readFile: filePath => {
+      try {
+        return fs.readFileSync(filePath, "utf8");
+      } catch {
+        return null;
+      }
+    },
+    listDir: dirPath => {
+      try {
+        return fs.readdirSync(dirPath);
+      } catch {
+        return [];
+      }
+    },
+    fcList
+  };
 }
 
 export async function runCli(args: string[], deps: CliDeps = {}): Promise<number> {
@@ -256,6 +316,18 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
     }
     usage(stderr);
     return 2;
+  }
+
+  if (command === "doctor") {
+    const rest = args.slice(1);
+    const json = rest.length === 1 && rest[0] === "--json";
+    if (rest.length > 0 && !json) {
+      usage(stderr);
+      return 2;
+    }
+    const report = collectDoctorReport({ ...doctorDepsFromEnv(), ...deps.doctorDeps });
+    stdout(json ? `${JSON.stringify(report, null, 2)}\n` : formatDoctorReport(report));
+    return 0;
   }
 
   if (command === "help" || command === "--help" || command === "-h") {

@@ -40,13 +40,17 @@ export function loadFromPaths(paths: string[]): Config {
     } catch {
       continue;
     }
-    try {
-      return merge(defaultConfig(), JSON.parse(raw));
-    } catch {
-      return defaultConfig();
-    }
+    return parseConfig(raw);
   }
   return defaultConfig();
+}
+
+export function parseConfig(raw: string): Config {
+  try {
+    return merge(defaultConfig(), JSON.parse(raw));
+  } catch {
+    return defaultConfig();
+  }
 }
 
 function merge(base: Config, patch: Record<string, unknown>): Config {
