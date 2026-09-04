@@ -13,6 +13,7 @@
 - Antigravity CLI 1.1.0 或更高版本,已验证至 1.1.24。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
+- 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
 
 `agy-hud` 以 Antigravity 插件归档包分发,不是 npm 包。归档包内已包含打包后的运行脚本 `dist/agy-hud.js`,所以插件用户不需要运行 `npm install`。
 
@@ -96,6 +97,42 @@ node <插件根目录>/dist/agy-hud.js version   # 确认已经报告新版本�
 
 配额缓存在两种情况下都无需任何操作,见[配额缓存](#配额缓存)。
 
+## 图标显示成方块
+
+HUD 里有四个图标取自 Nerd Font 的私有区码位:模型(U+EE9C)、套餐(U+F0A3)、git 分支(U+E725)、目录(U+F07C)。终端字体如果没有这些字形,每一个都会画成方块或 `[?]`。配额重置箭头 `↻` 是标准 Unicode(U+21BB),所以它照常显示——一行 `[?] 3.8 Flash High | [?] Pro | [?] dev` 配上正常的 `↻`,就正是这个情况,而不是插件坏了。
+
+跑内置的自检:
+
+```sh
+node <插件根目录>/dist/agy-hud.js doctor
+```
+
+它会打印当前生效的配置、识别到的终端、字体扫描结果,以及一行图标探针。**能回答这个问题的只有探针**,因为别的都做不到:终端不会回传它究竟画出了什么字形,所以没有任何程序能判断你屏幕上显示的是图标还是方块。请你自己看那行探针。
+
+如果探针显示的是方块,二选一。
+
+**A. 关掉图标。** 到处都能用,下一次重绘就生效,不需要任何字体:
+
+```sh
+mkdir -p ~/.config/agy-hud
+echo '{"show_icons": false}' > ~/.config/agy-hud/config.json   # 文件已存在时请把这个键合并进去
+```
+
+HUD 随后以纯文本渲染:`3.8 Flash High | Pro | dev`。
+
+先看 `doctor` 输出里的 `config` 那一行。如果它已经指向某个文件,请改**那一个**:bundle 旁边或插件根目录下的 `config.json` 优先级高于 `~/.config/agy-hud/config.json`(完整顺序见[配置](#配置)),所以在 `~/.config` 下新建的文件会被压住,屏幕上什么都不会变。
+
+**B. 保留图标。** 两步,而且只有第二步才会改变你看到的东西:
+
+1. 装一个 Nerd Font,例如 `brew install --cask font-hack-nerd-font`。
+2. 把终端的字体指向那个字族——iTerm2 → Settings → Profiles → Text → Font、VS Code 的 `terminal.integrated.fontFamily`、`~/.config/ghostty/config` 里的 `font-family`,等等。`doctor` 会针对它识别到的终端打印这个设置的位置。
+
+只装字体不会有任何变化,因为终端仍然用它自己 profile 里写的那个字族来画。
+
+字体扫描有两条限制,所以 `doctor` 把它作为启发式给出,而绝不作为判据。已安装的 Nerd Font 未必就是终端在用的那个。而 Ghostty、WezTerm、kitty 自带 Nerd Font 符号回退,所以扫不到任何东西的终端照样可能把每个图标都画得好好的。
+
+在 SSH 会话里,字形是由你本地机器上的终端画的,所以在远端主机上装字体不可能改变它们。请在本地机器上走方案 B,或者在远端走方案 A。
+
 ## 卸载
 
 `/statusline` 命令会把配置独立保存在插件文件之外。卸载前请先清除这项配置,避免 CLI
@@ -113,7 +150,7 @@ agy plugin uninstall agy-hud
 
 ## 面向 AI Agent
 
-如果你是正在替用户安装 `agy-hud` 的 AI agent,请不要静默安装。先确认显示效果。
+如果你是正在替用户安装 `agy-hud` 的 AI agent,请不要静默安装,也不要默认图标一定能显示出来。图标变成方块是 agent 代装之后最常见的抱怨,而它是用户机器上的字体状况,你从一串文本里是观察不到的。
 
 **先判断用户是不是已经装过**:读 `~/.gemini/antigravity-cli/settings.json` 里的 `statusLine.command`。如果它已经指向某个 `agy-hud.js`,那这就是一次**升级**而不是安装:请按[升级](#升级)一节,直接覆盖那个文件。不要只是 `agy plugin install` 到新的插件目录就收工——那样 CLI 跑的仍是旧文件,HUD 看起来完全正常,用户永远不会发现自己还停在旧版本。
 
@@ -126,13 +163,59 @@ agy plugin uninstall agy-hud
    Context ░░░░░░░░░░ 0% │ Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)
    ```
 
-   向用户说明各部分的含义:模型与套餐档位、工作目录、git 分支、带 token 明细的上下文进度条(`context_value: both`)、连续的配额剩余进度条、本地重置时间,以及 agent 状态。默认配置使用更紧凑的 `percent` 上下文显示。图标需要 Nerd Font —— 没有时会显示成方框 —— HUD 在窄终端下也会平滑降级。
+   向用户说明各部分的含义:模型与套餐档位、工作目录、git 分支、带 token 明细的上下文进度条(`context_value: both`)、连续的配额剩余进度条、本地重置时间,以及 agent 状态。默认配置使用更紧凑的 `percent` 上下文显示,HUD 在窄终端下也会平滑降级。
 
-2. 请用户确认效果,或询问是否需要调整 `multiline`、`show_icons`、`context_value` 或 `usage_value`(见[配置](#配置))。
+2. 在同一条消息里发出图标探针,并直接就它提问:
 
-3. 用户确认后,下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压。
+   ```
+    model     plan     branch     folder
+   ```
 
-4. 执行 `agy plugin install <解压目录>`。传入的必须是解压出来的归档目录,绝不能是 git clone 的仓库目录(原因见[从本地路径安装](#从本地路径安装))。安装成功后,请提示用户在 CLI 中运行 `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` 来启用状态栏——在此之前 HUD 不会出现。如果失败,把错误展示给用户,不要静默重试。
+   > 上面这四个标签,每一个前面是不是都有一个各不相同的图标?还是你看到的是方块、`[?]` 或空白?
+
+   等他回答。这个问题你自己答不了:你读到的是字符流,而问题问的是他的字体画出了什么。另外,只有当你的输出落在他实际运行 Antigravity CLI 的那个终端里时,探针才作数。如果他是通过网页或另一个终端在跟你对话,就说明这一点,并让他在第 4 步之后自己运行 `doctor`——它会在他自己的终端里打印同一行探针,而那里才是这个答案唯一有意义的地方。
+
+3. 如果他报告看到方块,请在安装**之前**就把配置写好,让他第一眼看到的 HUD 就是能用的:
+
+   ```sh
+   mkdir -p ~/.config/agy-hud
+   echo '{"show_icons": false}' > ~/.config/agy-hud/config.json
+   ```
+
+   如果文件已存在,请把这个键合并进去——读出来、设置 `show_icons`、再写回。不要覆盖用户已经调过的配置。另外,如果 `doctor` 报出的 `configPath` 不是这一个,请改写到它报出的那个路径:bundle 旁边的配置优先级更高,写在这里的文件会被压住。
+
+   **除非用户主动要求,否则不要替他装字体。** 那是系统级改动,而且它本身什么都修不好:终端仍然按自己 profile 里写的字族来画,而那个设置无法可靠地脚本化。在 SSH 场景下更是有害无益——字形由他本地机器上的终端绘制,在远端主机装字体不可能改变任何东西。如果他确实想要图标,把[图标显示成方块](#图标显示成方块)里的两步告诉他,第二步交给他自己做。
+
+4. 询问用户是否需要调整 `multiline`、`context_value` 或 `usage_value`(见[配置](#配置))。然后下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压,执行 `agy plugin install <解压目录>`。传入的必须是解压出来的归档目录,绝不能是 git clone 的仓库目录(原因见[从本地路径安装](#从本地路径安装))。如果失败,把错误展示给用户,不要静默重试。
+
+5. 用 `node <插件根目录>/dist/agy-hud.js doctor --json` 校验安装结果,它以机器可读的 JSON 汇报:
+
+   ```json
+   {
+     "version": "0.1.10",
+     "homedir": "/home/u",
+     "nodeVersion": "v22.14.0",
+     "nodeOk": true,
+     "statuslineCommand": "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh",
+     "statuslineWired": true,
+     "configPath": "/home/u/.config/agy-hud/config.json",
+     "suggestedConfigPath": "/home/u/.config/agy-hud/config.json",
+     "showIcons": false,
+     "terminal": "iTerm.app",
+     "remoteSession": false,
+     "nerdFont": "not-found",
+     "nerdFontMatches": []
+   }
+   ```
+
+   按下面的方式处理:
+
+   - `nodeOk: false` —— 运行时低于 18。如实汇报,HUD 跑不起来。
+   - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`,在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
+   - `showIcons` —— 确认第 3 步最终落在了哪种模式。
+   - `nerdFont` —— **只是提示,绝不是判据。** `not-found` 不代表图标坏了,因为 Ghostty、WezTerm、kitty 自带字形回退;`found` 也不代表图标能用,因为终端可能在用另一个字族。绝不要仅凭这个字段就去关图标,或去建议装字体。能定论的证据只有第 2 步用户的回答,或者 `doctor` 普通输出里的那行探针。
+
+   不带 `--json` 的 `doctor` 会打印同一份报告外加图标探针,所以对于那些不在 CLI 终端里跟你对话的用户,它也可以充当第 2 步的检查手段。
 
 ## Release 归档内容
 
@@ -150,9 +233,13 @@ GitHub release 会发布一个平台无关归档包:
 node <插件根目录>/dist/agy-hud.js statusline < statusline_payload.json
 node <插件根目录>/dist/agy-hud.js version
 node <插件根目录>/dist/agy-hud.js quota refresh
+node <插件根目录>/dist/agy-hud.js doctor
+node <插件根目录>/dist/agy-hud.js doctor --json
 ```
 
 下文为了简洁,用 `agy-hud` 指代上面这条命令。如果你经常用,可以自己配一个 alias。
+
+`doctor` 自检一次安装:Node 版本、CLI 的状态栏接到了哪条命令、当前生效的配置文件与 `show_icons` 的解析结果、识别到的终端、是否 SSH 会话、启发式字体扫描,以及一行给你读的图标探针。它不改动磁盘上的任何东西。`--json` 输出同一份报告的机器可读 JSON,供刚完成安装、需要自查的 agent 使用;各字段该怎么处理见[面向 AI Agent](#面向-ai-agent)。
 
 `statusline` 从标准输入以及本地配置/缓存文件渲染。当 `agent_state` 从 active work 回到 `idle` 时,它会先做一次本地 loopback `quota refresh` 再渲染,让同一次 redraw 就能反映本轮回答后的配额。缺失或过期缓存仍会用后台刷新作为兜底。`quota refresh` 会向正在运行的 Antigravity 本地服务请求 `GetUserStatus`,写入脱敏后的配额缓存;如果找不到可用的本地服务,会以非零状态退出。
 
@@ -192,7 +279,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 - `show_agent_state`:显示来自标准输入的 `agent_state`,例如 `Idle`、`Thinking` 或 `Auth`。
 - `show_cost`:显示 Antigravity CLI 1.1.21+ 提供的会话费用 `cost.total_usd`,位于首行末尾(单行模式则在该行末尾)。`estimated: true` 时加 `~`,例如 `~$0.02`。零显示为 `$0.00`,小于 $0.001 的正数显示为 `<$0.001`;缺失、负数或非有限数不显示。HUD 不额外累加 `subagent_usd`,也不自行计算订阅扣费;该值不是账单或实际收费承诺。
-- `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。
+- `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。跑 `doctor` 可以看到图标探针和确切的修复方式;完整说明见[图标显示成方块](#图标显示成方块)。
 - `context_value`:`percent`、`tokens` 或 `both`。默认为 `percent`,即上下文显示当前输入侧窗口占用率。存在 token 总量时,百分比和进度条会由 `total_input_tokens / context_window_size` 计算,避免最近一次长输出让 HUD 跳动。
 - `usage_value`:`remaining` 或 `percent`。默认为 `remaining`,即配额文字和进度条都显示剩余量。当 Antigravity 提供 5 小时和周两个窗口时,HUD 会按顺序分开显示各自的刷新倒计时,例如 `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`。
 
@@ -252,6 +339,8 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 `agy-hud quota refresh` 只访问 loopback 上的本地 Antigravity 服务,不会打印 CSRF token、cookie 或原始 probe 响应。
 
 渲染器刻意不打印敏感的状态栏字段,包括邮箱、session ID、会话 ID、transcript 路径、token、CSRF 值、cookie、密钥以及完整的工作区路径。git 分支检测直接读取 `.git/HEAD`,不会调用 `git`。
+
+`agy-hud doctor` 只读取本地文件、只打印本地事实,不向任何地方发送数据,也不写入任何文件。由于它的输出正是你会贴进 bug 报告的内容,家目录下的路径会缩写成 `~/…`,从而去掉你的账户名。`doctor --json` 保留绝对路径,因为它面向的是同一台机器上的 agent——把这份输出贴到别处之前请先自己过一遍。
 
 请勿在 issue 或 pull request 中放入原始 Antigravity probe 负载、日志、cookie、token、邮箱或本机路径。
 

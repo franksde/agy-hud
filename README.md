@@ -13,6 +13,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 - Antigravity CLI 1.1.0 or newer, verified through 1.1.24. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
+- A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
 
 `agy-hud` is distributed as an Antigravity plugin archive, not as an npm package. The archive includes the bundled runtime script at `dist/agy-hud.js`, so plugin users do not need to run `npm install`.
 
@@ -96,6 +97,42 @@ node <plugin-root>/dist/agy-hud.js version   # confirm it now reports the new ve
 
 The quota cache needs no action either way. See [Quota Cache](#quota-cache).
 
+## Icons Render As Boxes
+
+The HUD draws four icons from the Nerd Font Private Use Area: model (U+EE9C), plan (U+F0A3), git branch (U+E725), and directory (U+F07C). A terminal font without those glyphs draws each one as a box or `[?]`. The quota reset arrow `↻` is plain Unicode (U+21BB), so it keeps rendering — a status line like `[?] 3.8 Flash High | [?] Pro | [?] dev` with a working `↻` is exactly this, and not a broken install.
+
+Run the built-in check:
+
+```sh
+node <plugin-root>/dist/agy-hud.js doctor
+```
+
+It prints the resolved config, the terminal it detected, a font scan, and an icon probe. **The probe is the part that answers the question**, because nothing else can: a terminal never reports back which glyphs it actually drew, so no program can tell whether your screen is showing icons or boxes. Read the probe line yourself.
+
+If the probe shows boxes, pick one.
+
+**A. Turn the icons off.** Works everywhere, takes effect on the next redraw, needs no font:
+
+```sh
+mkdir -p ~/.config/agy-hud
+echo '{"show_icons": false}' > ~/.config/agy-hud/config.json   # merge the key if the file already exists
+```
+
+The HUD then renders as plain text: `3.8 Flash High | Pro | dev`.
+
+Check the `config` line in `doctor` output first. If it already names a file, edit **that** one instead: a `config.json` next to the bundle or in the plugin root outranks `~/.config/agy-hud/config.json` (see [Config](#config) for the full order), so a new file under `~/.config` would sit there shadowed while nothing on screen changes.
+
+**B. Keep the icons.** Two steps, and only the second one changes what you see:
+
+1. Install a Nerd Font, for example `brew install --cask font-hack-nerd-font`.
+2. Point the terminal at that family — iTerm2 → Settings → Profiles → Text → Font, VS Code's `terminal.integrated.fontFamily`, `font-family` in `~/.config/ghostty/config`, and so on. `doctor` prints the location for the terminal it detects.
+
+Installing the font alone changes nothing, because the terminal keeps drawing with whatever family its own profile names.
+
+Two limits on the font scan, which is why `doctor` reports it as a heuristic and never as a verdict. An installed Nerd Font is not necessarily the one your terminal draws with. And Ghostty, WezTerm and kitty ship their own Nerd Font symbol fallback, so a scan that finds nothing can still be a terminal that renders every icon correctly.
+
+Over SSH the glyphs are drawn by the terminal on your local machine, so a font installed on the remote host cannot change them. Take option B on the local machine, or option A on the remote one.
+
 ## Uninstalling
 
 The `/statusline` command stores its configuration separately from the plugin files. Clear that
@@ -114,26 +151,72 @@ agy plugin uninstall agy-hud
 
 ## For AI Agents
 
-If you are an AI agent installing `agy-hud` for someone, do not install silently. Confirm the look first.
+If you are an AI agent installing `agy-hud` for someone, do not install silently, and do not assume the icons will render. Icons showing up as boxes is the most common complaint after an agent-run install, and it is a font condition on the user's machine that you cannot observe from a text stream.
 
 **First check whether they already have it**, by reading `statusLine.command` in `~/.gemini/antigravity-cli/settings.json`. If it already points at an `agy-hud.js`, this is an upgrade, not an install: follow [Upgrading](#upgrading) and overwrite that exact file. Do not `agy plugin install` into the new plugin directory and stop there — the CLI would keep running the old copy, the HUD would look perfectly healthy, and the user would never learn they are still on the old version.
 
 For a genuinely new install:
 
-1. Send the user this preview of a fully-populated HUD so they see every element before anything is installed:
+1. Send the user this preview of a fully-populated HUD, so they see every element before anything is installed:
 
    ```
     3.5 Flash High |  Pro │  agy-hud │  main
    Context ░░░░░░░░░░ 0% │ Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)
    ```
 
-   Tell them what they are looking at: model and plan tier, working directory, git branch, a context bar with token detail (`context_value: both`), quota remaining as a continuous bar, local reset time, and agent state. The default config shows a more compact `percent` context. Icons need a Nerd Font — without one they render as boxes — and the HUD degrades cleanly on narrow terminals.
+   Tell them what they are looking at: model and plan tier, working directory, git branch, a context bar with token detail (`context_value: both`), quota remaining as a continuous bar, local reset time, and agent state. The default config shows a more compact `percent` context, and the HUD degrades cleanly on narrow terminals.
 
-2. Ask the user to confirm the effect, or whether they want to adjust `multiline`, `show_icons`, `context_value`, or `usage_value` (see [Config](#config)).
+2. In the same message, send the icon probe and ask about it directly:
 
-3. After the user confirms, download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, then extract it.
+   ```
+    model     plan     branch     folder
+   ```
 
-4. Run `agy plugin install <extracted-dir>`. Pass the extracted archive directory, never a git clone (see [Install From Local Path](#install-from-local-path) for why). After successful installation, instruct the user to run `/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh` in their CLI — the HUD does not appear until they do. If it fails, show the user the error instead of retrying silently.
+   > Does each of those four labels have its own distinct icon in front of it, or do you see boxes, `[?]`, or blanks?
+
+   Wait for the answer. You cannot answer this one yourself: you are reading a character stream, and the question is about what their font draws. The probe also only counts when your output lands in the same terminal they run the Antigravity CLI in. If they are reading you through a web UI or a different terminal, say so and have them run `doctor` themselves after step 4 — it prints the same probe inside their own terminal, which is the only place the answer means anything.
+
+3. If they report boxes, write the config **before** installing, so the first HUD they ever see is a working one:
+
+   ```sh
+   mkdir -p ~/.config/agy-hud
+   echo '{"show_icons": false}' > ~/.config/agy-hud/config.json
+   ```
+
+   If the file already exists, merge the key in — read it, set `show_icons`, write it back. Do not overwrite a config the user has already tuned. And if `doctor` reports a `configPath` other than this one, write to that path instead: a config next to the bundle outranks the home one, and a file written here would be shadowed.
+
+   **Do not install a font on their behalf unless they ask for it.** It is a system-level change, and on its own it fixes nothing: the terminal keeps drawing with the family named in its own profile, and that setting is not reliably scriptable. Over SSH it is worse than useless, because the glyphs are drawn by the terminal on their local machine and a font installed on the remote host cannot change them. If they do want icons, give them the two steps from [Icons Render As Boxes](#icons-render-as-boxes) and let them do the second one.
+
+4. Ask whether they want to adjust `multiline`, `context_value`, or `usage_value` (see [Config](#config)). Then download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, extract it, and run `agy plugin install <extracted-dir>`. Pass the extracted archive directory, never a git clone (see [Install From Local Path](#install-from-local-path) for why). If it fails, show the user the error instead of retrying silently.
+
+5. Verify the install with `node <plugin-root>/dist/agy-hud.js doctor --json`, which reports it as machine-readable JSON:
+
+   ```json
+   {
+     "version": "0.1.10",
+     "homedir": "/home/u",
+     "nodeVersion": "v22.14.0",
+     "nodeOk": true,
+     "statuslineCommand": "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh",
+     "statuslineWired": true,
+     "configPath": "/home/u/.config/agy-hud/config.json",
+     "suggestedConfigPath": "/home/u/.config/agy-hud/config.json",
+     "showIcons": false,
+     "terminal": "iTerm.app",
+     "remoteSession": false,
+     "nerdFont": "not-found",
+     "nerdFontMatches": []
+   }
+   ```
+
+   Act on it as follows:
+
+   - `nodeOk: false` — the runtime is older than 18. Report it; the HUD will not run.
+   - `statuslineWired: false` — the CLI is not running this plugin. Tell the user to run `/statusline <plugin-root>/hooks/status-line.sh`, because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired means something else owns their status line; say what it is rather than overwriting it.
+   - `showIcons` — confirms which mode step 3 actually landed in.
+   - `nerdFont` — **a hint, never a decision.** `not-found` does not mean the icons are broken, because Ghostty, WezTerm and kitty ship their own glyph fallback. `found` does not mean they work either, because the terminal may draw with a different family. Never turn icons off, and never propose a font install, on the strength of this field alone. The user's answer in step 2, or the probe printed by plain `doctor`, is the only evidence that settles it.
+
+   Plain `doctor`, without `--json`, prints the same report plus the icon probe, so it also serves as the step 2 check for a user who was reading you somewhere other than their CLI terminal.
 
 ## Expected Release Install Shape
 
@@ -151,9 +234,13 @@ Installing the plugin does **not** put an `agy-hud` command on your `PATH` — t
 node <plugin-root>/dist/agy-hud.js statusline < statusline_payload.json
 node <plugin-root>/dist/agy-hud.js version
 node <plugin-root>/dist/agy-hud.js quota refresh
+node <plugin-root>/dist/agy-hud.js doctor
+node <plugin-root>/dist/agy-hud.js doctor --json
 ```
 
 The examples below use `agy-hud` as shorthand for that. If you use these often, alias it.
+
+`doctor` self-checks an install: Node version, which command the CLI has wired to its status line, which config file is in effect and what `show_icons` resolves to, the terminal it detects, whether this is an SSH session, a heuristic font scan, and an icon probe for you to read. It changes nothing on disk. `--json` prints the same report as machine-readable JSON, for an agent that needs to check an install it just performed; see [For AI Agents](#for-ai-agents) for how to act on each field.
 
 `statusline` renders from stdin plus local config/cache files. When `agent_state` settles from active work back to `idle`, it performs one local loopback `quota refresh` before rendering so the same redraw can reflect post-response quota. Missing or stale cache data can still refresh in the background as a fallback. `quota refresh` asks the running Antigravity local server for `GetUserStatus`, writes the sanitized quota cache, and exits non-zero if no local server can be reached.
 
@@ -193,7 +280,7 @@ Display options:
 
 - `show_agent_state`: shows stdin `agent_state` such as `Idle`, `Thinking`, or `Auth`.
 - `show_cost`: shows the session cost supplied as `cost.total_usd` by Antigravity CLI 1.1.21+, at the end of the top line (or the single line). `estimated: true` adds `~`, for example `~$0.02`. Zero displays as `$0.00`, positive amounts below $0.001 as `<$0.001`; missing, negative or non-finite values are omitted. The HUD does not separately add `subagent_usd` or calculate subscription charges; this is not an invoice or a promise of actual billing.
-- `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes.
+- `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes. Run `doctor` to see the icon probe and the exact fix; [Icons Render As Boxes](#icons-render-as-boxes) covers the whole question.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.
 - `usage_value`: `remaining` or `percent`. Default is `remaining`, so quota text and bar show what is left. When Antigravity provides both windows, the HUD shows them separately with per-window reset durations, for example `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`.
 
@@ -255,6 +342,8 @@ If quota data is missing, the HUD omits the usage segment instead of showing a f
 `agy-hud quota refresh` contacts only the local Antigravity server on loopback and does not print CSRF tokens, cookies, or raw probe responses.
 
 The renderer intentionally avoids printing sensitive status-line fields, including email, session IDs, conversation IDs, transcript paths, tokens, CSRF values, cookies, keys, and full workspace paths. Git branch detection reads `.git/HEAD` directly and does not run `git`.
+
+`agy-hud doctor` reads only local files and prints only local facts; it sends nothing anywhere and writes nothing. Because its output is what you would paste into a bug report, paths under your home directory are abbreviated to `~/…`, which drops your account name. `doctor --json` keeps them absolute, since it is meant for an agent acting on the same machine — review that output before pasting it anywhere.
 
 Do not put raw Antigravity probe payloads, logs, cookies, tokens, emails, or local machine paths in issues or pull requests.
 

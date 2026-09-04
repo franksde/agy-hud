@@ -62,6 +62,26 @@ If the live CLI still shows old output, first check that this installed bundle w
 - The quota bar is a continuous progress bar derived from the exact quota fraction, 8 cells for a single window and 10 per window when both are shown (`usageBar` in `src/statusline.ts`). It is not five discrete 20% cells; an earlier revision of this file said otherwise, and that never matched the code, the tests, or the READMEs.
 - The context bar is likewise continuous, based on a precise context percentage.
 
+## Font Detection Is A Hint, Not A Test
+
+`doctor` (`src/doctor.ts`) scans font directories and prints an icon probe. The scan is deliberately
+reported as a heuristic in both directions, and that wording is not hedging:
+
+- An installed Nerd Font is not necessarily the family the terminal draws with. That choice lives in
+  the terminal's own profile (iTerm2 plist, `terminal.integrated.fontFamily`, a ghostty config line),
+  not in the system font list.
+- Ghostty, WezTerm and kitty ship their own Nerd Font symbol fallback. A scan that finds nothing on
+  those terminals still renders every icon. This machine is such a case: the scan reports
+  `not-found` while the HUD icons render correctly.
+
+There is no protocol path to a real test. A terminal never reports back which glyph it drew, and a
+tofu box occupies the same single column as the glyph it replaces, so `ESC[6n` cursor-position
+probing cannot separate them either. The icon probe needs a human to read it, and every code path
+and doc sentence around it must keep saying so. Do not promote the scan to a verdict, do not gate
+`show_icons` on it automatically, and do not add font installation to any install flow: installing a
+font changes nothing without the terminal's own font setting, and over SSH the glyphs are drawn on
+the user's local machine, where a remote install cannot reach at all.
+
 ## Do Not "Optimize Away" The Quota Probe
 
 On CLI 1.0.8+ the payload carries official quota and the HUD renders from it, so the background probe
