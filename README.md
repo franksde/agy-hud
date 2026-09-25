@@ -95,6 +95,8 @@ node <plugin-root>/dist/agy-hud.js version   # confirm it now reports the new ve
 
 **If your HUD disappeared after updating the Antigravity CLI to 1.1.x**, you were relying on the old `components` hook, which the CLI no longer registers. Install the new version normally and wire it up once with `/statusline`, as in the install sections above. This step is unavoidable: a plugin has no install hook that can write the status-line setting for you — `components` *was* that mechanism, and it is gone.
 
+**Reinstalling deletes a `config.json` kept inside the plugin directory.** Since Antigravity CLI 1.1.28, `agy plugin install` replaces the plugin's directory exactly, so a config next to the bundle or in the plugin root does not survive it. Move it to `~/.config/agy-hud/config.json` before reinstalling; `doctor` warns when the config in effect sits in that position. Overwriting only the bundle, as above, leaves it alone.
+
 The quota cache needs no action either way. See [Quota Cache](#quota-cache).
 
 ## Icons Render As Boxes
@@ -201,6 +203,8 @@ For a genuinely new install:
      "statuslineWired": true,
      "configPath": "/home/u/.config/agy-hud/config.json",
      "suggestedConfigPath": "/home/u/.config/agy-hud/config.json",
+     "userConfigPath": "/home/u/.config/agy-hud/config.json",
+     "configInPluginDir": false,
      "showIcons": false,
      "terminal": "iTerm.app",
      "remoteSession": false,
@@ -214,6 +218,7 @@ For a genuinely new install:
    - `nodeOk: false` — the runtime is older than 18. Report it; the HUD will not run.
    - `statuslineWired: false` — the CLI is not running this plugin. Tell the user to run `/statusline <plugin-root>/hooks/status-line.sh`, because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired means something else owns their status line; say what it is rather than overwriting it.
    - `showIcons` — confirms which mode step 3 actually landed in.
+   - `configInPluginDir: true` — the config in effect lives inside the plugin directory, and the next `agy plugin install` on Antigravity CLI 1.1.28+ deletes it. Tell the user, and with their agreement move it to `userConfigPath`: merge it into any file already there, then remove the plugin-directory copy, which would otherwise keep outranking it until the reinstall silently drops it.
    - `nerdFont` — **a hint, never a decision.** `not-found` does not mean the icons are broken, because Ghostty, WezTerm and kitty ship their own glyph fallback. `found` does not mean they work either, because the terminal may draw with a different family. Never turn icons off, and never propose a font install, on the strength of this field alone. The user's answer in step 2, or the probe printed by plain `doctor`, is the only evidence that settles it.
 
    Plain `doctor`, without `--json`, prints the same report plus the icon probe, so it also serves as the step 2 check for a user who was reading you somewhere other than their CLI terminal.
@@ -253,6 +258,8 @@ The examples below use `agy-hud` as shorthand for that. If you use these often, 
 - `config.json` next to the bundled script or plugin root
 - `$XDG_CONFIG_HOME/agy-hud/config.json`
 - `$HOME/.config/agy-hud/config.json`
+
+Prefer the user-level path. A `config.json` inside the plugin directory still works, but Antigravity CLI 1.1.28+ replaces that directory exactly on `agy plugin install`, so the next reinstall deletes it without a warning. `doctor` flags a config in that position.
 
 Default config:
 

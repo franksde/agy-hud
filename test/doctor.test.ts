@@ -11,6 +11,7 @@ function deps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
     homedir: "/home/u",
     configPaths: [],
     userConfigPath: "/home/u/.config/agy-hud/config.json",
+    pluginConfigPaths: [],
     readFile: () => null,
     listDir: () => [],
     ...overrides
@@ -295,4 +296,51 @@ test("serializes the report as JSON for agents", () => {
   assert.equal(parsed.terminal, "ghostty");
   assert.equal(parsed.showIcons, true);
   assert.equal(parsed.nodeOk, true);
+});
+
+// Antigravity CLI 1.1.28 made `agy plugin install` replace the plugin's managed directory exactly,
+// so a config.json the user placed inside it is deleted by the next reinstall of the plugin.
+const pluginConfig = "/home/u/.gemini/config/plugins/agy-hud/config.json";
+
+test("flags a config in effect that lives inside the plugin directory", () => {
+  const report = collectDoctorReport(deps({
+    configPaths: [pluginConfig, "/home/u/.config/agy-hud/config.json"],
+    pluginConfigPaths: [pluginConfig],
+    readFile: p => (p === pluginConfig ? "{}" : null)
+  }));
+  assert.equal(report.configInPluginDir, true);
+  assert.equal(report.userConfigPath, "/home/u/.config/agy-hud/config.json");
+});
+
+test("does not flag a user-level or missing config as living in the plugin directory", () => {
+  const home = "/home/u/.config/agy-hud/config.json";
+  const userLevel = collectDoctorReport(deps({
+    configPaths: [pluginConfig, home],
+    pluginConfigPaths: [pluginConfig],
+    readFile: p => (p === home ? "{}" : null)
+  }));
+  assert.equal(userLevel.configInPluginDir, false);
+  const none = collectDoctorReport(deps({ configPaths: [pluginConfig, home], pluginConfigPaths: [pluginConfig] }));
+  assert.equal(none.configInPluginDir, false);
+});
+
+test("warns that a plugin-directory config is deleted by a reinstall and names where to move it", () => {
+  const text = formatDoctorReport(collectDoctorReport(deps({
+    configPaths: [pluginConfig, "/home/u/.config/agy-hud/config.json"],
+    pluginConfigPaths: [pluginConfig],
+    readFile: p => (p === pluginConfig ? "{}" : null)
+  })));
+  assert.match(text, /agy plugin install/);
+  assert.match(text, /1\.1\.28/);
+  assert.ok(text.includes("move it to ~/.config/agy-hud/config.json"), "must name the user-level target");
+});
+
+test("prints no reinstall warning for a user-level config", () => {
+  const home = "/home/u/.config/agy-hud/config.json";
+  const text = formatDoctorReport(collectDoctorReport(deps({
+    configPaths: [home],
+    pluginConfigPaths: [pluginConfig],
+    readFile: p => (p === home ? "{}" : null)
+  })));
+  assert.doesNotMatch(text, /agy plugin install/);
 });

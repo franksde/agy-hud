@@ -21,6 +21,9 @@ export interface DoctorDeps {
   // the caller rather than pattern-matched out of configPaths, which cannot recognise a custom XDG
   // directory and would silently suggest a different file from the one the loader prefers.
   userConfigPath: string;
+  // The config candidates inside the plugin directory (next to the bundle and in the plugin root).
+  // Antigravity CLI 1.1.28+ replaces that directory exactly on `agy plugin install`, deleting them.
+  pluginConfigPaths: string[];
   readFile(path: string): string | null;
   listDir(path: string): string[];
   // Linux font discovery goes through fc-list. `null` means the command is unavailable, which is
@@ -37,6 +40,8 @@ export interface DoctorReport {
   statuslineWired: boolean;
   configPath: string | null;
   suggestedConfigPath: string;
+  userConfigPath: string;
+  configInPluginDir: boolean;
   showIcons: boolean;
   terminal: string;
   remoteSession: boolean;
@@ -66,6 +71,8 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     statuslineWired,
     configPath: config.path,
     suggestedConfigPath: suggested,
+    userConfigPath: homeConfigPath(deps),
+    configInPluginDir: config.path !== null && deps.pluginConfigPaths.includes(config.path),
     showIcons: config.value.showIcons,
     terminal: detectTerminal(deps.env),
     remoteSession: Boolean(deps.env.SSH_CONNECTION || deps.env.SSH_TTY),
@@ -230,6 +237,12 @@ export function formatDoctorReport(report: DoctorReport): string {
   row("config", report.configPath
     ? `${short(report.configPath)} (show_icons: ${report.showIcons})`
     : `none found, using defaults (show_icons: ${report.showIcons})`);
+  if (report.configInPluginDir) {
+    // Still the file in effect, so option A below keeps naming it; this is about the next upgrade.
+    lines.push(" ".repeat(14) + "inside the plugin directory, which `agy plugin install` replaces on");
+    lines.push(" ".repeat(14) + "Antigravity CLI 1.1.28+, deleting this file. To keep your settings,");
+    lines.push(" ".repeat(14) + `move it to ${short(report.userConfigPath)}`);
+  }
   row("terminal", report.terminal);
   row("session", report.remoteSession ? "remote (SSH)" : "local");
   const fontLines = nerdFontLines(report);

@@ -152,6 +152,7 @@ var main_exports = {};
 __export(main_exports, {
   configPaths: () => configPaths,
   doctorDepsFromEnv: () => doctorDepsFromEnv,
+  pluginConfigPaths: () => pluginConfigPaths,
   quotaCacheNeedsRefresh: () => quotaCacheNeedsRefresh,
   quotaCacheReadCandidates: () => quotaCacheReadCandidates,
   quotaCacheWritePath: () => quotaCacheWritePath,
@@ -1182,6 +1183,8 @@ function collectDoctorReport(deps) {
     statuslineWired,
     configPath: config.path,
     suggestedConfigPath: suggested,
+    userConfigPath: homeConfigPath(deps),
+    configInPluginDir: config.path !== null && deps.pluginConfigPaths.includes(config.path),
     showIcons: config.value.showIcons,
     terminal: detectTerminal(deps.env),
     remoteSession: Boolean(deps.env.SSH_CONNECTION || deps.env.SSH_TTY),
@@ -1312,6 +1315,11 @@ function formatDoctorReport(report) {
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
   row("statusline", report.statuslineCommand ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}` : "not configured \u2014 run /statusline <plugin-root>/hooks/status-line.sh in the CLI");
   row("config", report.configPath ? `${short(report.configPath)} (show_icons: ${report.showIcons})` : `none found, using defaults (show_icons: ${report.showIcons})`);
+  if (report.configInPluginDir) {
+    lines.push(" ".repeat(14) + "inside the plugin directory, which `agy plugin install` replaces on");
+    lines.push(" ".repeat(14) + "Antigravity CLI 1.1.28+, deleting this file. To keep your settings,");
+    lines.push(" ".repeat(14) + `move it to ${short(report.userConfigPath)}`);
+  }
   row("terminal", report.terminal);
   row("session", report.remoteSession ? "remote (SSH)" : "local");
   const fontLines = nerdFontLines(report);
@@ -1423,9 +1431,7 @@ function configPaths() {
   if (explicit) {
     paths.push(explicit);
   }
-  const dir = import_node_path4.default.dirname(__filename);
-  paths.push(import_node_path4.default.join(dir, "config.json"));
-  paths.push(import_node_path4.default.join(dir, "..", "config.json"));
+  paths.push(...pluginConfigPaths());
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
     paths.push(import_node_path4.default.join(xdg, "agy-hud", "config.json"));
@@ -1435,6 +1441,10 @@ function configPaths() {
     paths.push(import_node_path4.default.join(home, ".config", "agy-hud", "config.json"));
   }
   return paths;
+}
+function pluginConfigPaths() {
+  const dir = import_node_path4.default.dirname(__filename);
+  return [import_node_path4.default.join(dir, "config.json"), import_node_path4.default.join(dir, "..", "config.json")];
 }
 function userConfigPath() {
   const xdg = process.env.XDG_CONFIG_HOME;
@@ -1562,6 +1572,7 @@ function doctorDepsFromEnv() {
     homedir: import_node_os.default.homedir(),
     configPaths: configPaths(),
     userConfigPath: userConfigPath(),
+    pluginConfigPaths: pluginConfigPaths(),
     readFile: (filePath) => {
       try {
         return import_node_fs5.default.readFileSync(filePath, "utf8");
@@ -1891,6 +1902,7 @@ if (require.main === module) {
 0 && (module.exports = {
   configPaths,
   doctorDepsFromEnv,
+  pluginConfigPaths,
   quotaCacheNeedsRefresh,
   quotaCacheReadCandidates,
   quotaCacheWritePath,

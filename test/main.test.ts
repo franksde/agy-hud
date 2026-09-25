@@ -1064,6 +1064,11 @@ test("doctorDepsFromEnv reads the real environment without throwing", () => {
   assert.equal(deps.version, version);
   assert.equal(deps.nodeVersion, process.version);
   assert.ok(deps.configPaths.length > 0);
+  // The plugin-directory candidates are exactly the bundle-relative entries the loader tries.
+  assert.equal(deps.pluginConfigPaths.length, 2);
+  for (const candidate of deps.pluginConfigPaths) {
+    assert.ok(deps.configPaths.includes(candidate), `${candidate} must be a loader candidate`);
+  }
   assert.deepEqual(deps.listDir("/definitely/not/a/font/dir"), []);
   assert.equal(deps.readFile("/definitely/not/a/file.json"), null);
 });

@@ -95,6 +95,8 @@ node <插件根目录>/dist/agy-hud.js version   # 确认已经报告新版本�
 
 **如果你的 HUD 在把 Antigravity CLI 升到 1.1.x 之后就消失了**,说明你之前依赖的是旧的 `components` hook,而新版 CLI 不再注册它。按上面的安装步骤装好新版,并用 `/statusline` 接一次线即可。这一步无法省略:插件没有任何 install hook 能替你写入状态栏配置——`components` 原本就是那个机制,而它已经没了。
 
+**重新安装会删掉放在插件目录里的 `config.json`。** 从 Antigravity CLI 1.1.28 起,`agy plugin install` 会把插件目录整个按源目录原样替换,bundle 旁边或插件根目录下的配置不会保留。重装前请把它移到 `~/.config/agy-hud/config.json`;生效配置处在这个位置时,`doctor` 会给出提示。像上面那样只覆盖 bundle 则不受影响。
+
 配额缓存在两种情况下都无需任何操作,见[配额缓存](#配额缓存)。
 
 ## 图标显示成方块
@@ -200,6 +202,8 @@ agy plugin uninstall agy-hud
      "statuslineWired": true,
      "configPath": "/home/u/.config/agy-hud/config.json",
      "suggestedConfigPath": "/home/u/.config/agy-hud/config.json",
+     "userConfigPath": "/home/u/.config/agy-hud/config.json",
+     "configInPluginDir": false,
      "showIcons": false,
      "terminal": "iTerm.app",
      "remoteSession": false,
@@ -213,6 +217,7 @@ agy plugin uninstall agy-hud
    - `nodeOk: false` —— 运行时低于 18。如实汇报,HUD 跑不起来。
    - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`,在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
    - `showIcons` —— 确认第 3 步最终落在了哪种模式。
+   - `configInPluginDir: true` —— 当前生效的配置放在插件目录里,Antigravity CLI 1.1.28+ 下一次 `agy plugin install` 就会把它删掉。请告诉用户,征得同意后把它移到 `userConfigPath`:如果那里已有文件就合并进去,然后删除插件目录里的那份——否则它会一直压住新位置的配置,直到某次重装把它悄悄删掉。
    - `nerdFont` —— **只是提示,绝不是判据。** `not-found` 不代表图标坏了,因为 Ghostty、WezTerm、kitty 自带字形回退;`found` 也不代表图标能用,因为终端可能在用另一个字族。绝不要仅凭这个字段就去关图标,或去建议装字体。能定论的证据只有第 2 步用户的回答,或者 `doctor` 普通输出里的那行探针。
 
    不带 `--json` 的 `doctor` 会打印同一份报告外加图标探针,所以对于那些不在 CLI 终端里跟你对话的用户,它也可以充当第 2 步的检查手段。
@@ -252,6 +257,8 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 - 打包脚本旁边或插件根目录下的 `config.json`
 - `$XDG_CONFIG_HOME/agy-hud/config.json`
 - `$HOME/.config/agy-hud/config.json`
+
+建议使用用户级路径。插件目录里的 `config.json` 仍然有效,但 Antigravity CLI 1.1.28+ 在 `agy plugin install` 时会把插件目录原样替换,下一次重装就会不加提示地删掉它。生效配置处在这个位置时,`doctor` 会给出提示。
 
 默认配置:
 

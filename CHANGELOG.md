@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `doctor` warns when the config in effect lives inside the plugin directory. Antigravity CLI 1.1.28 made `agy plugin install` replace a plugin's directory exactly, so a `config.json` next to the bundle or in the plugin root is deleted by the next reinstall. The human report names the user-level path to move it to; `doctor --json` adds `configInPluginDir` and `userConfigPath`. Both READMEs recommend the user-level config path and warn about reinstalls.
+
 ## 0.1.10 — 2026-09-04
 
 - Updated verified compatibility with Antigravity CLI through 1.1.26, covering install, status-line wiring, rendering and the loopback quota probe.

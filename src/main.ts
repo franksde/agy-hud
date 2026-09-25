@@ -60,9 +60,7 @@ export function configPaths(): string[] {
   if (explicit) {
     paths.push(explicit);
   }
-  const dir = path.dirname(__filename);
-  paths.push(path.join(dir, "config.json"));
-  paths.push(path.join(dir, "..", "config.json"));
+  paths.push(...pluginConfigPaths());
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
     paths.push(path.join(xdg, "agy-hud", "config.json"));
@@ -72,6 +70,13 @@ export function configPaths(): string[] {
     paths.push(path.join(home, ".config", "agy-hud", "config.json"));
   }
   return paths;
+}
+
+// The candidates next to the bundle and in the plugin root. Both sit inside the plugin's managed
+// directory, which Antigravity CLI 1.1.28+ replaces exactly on `agy plugin install`.
+export function pluginConfigPaths(): string[] {
+  const dir = path.dirname(__filename);
+  return [path.join(dir, "config.json"), path.join(dir, "..", "config.json")];
 }
 
 // The user-level config file to create when none exists yet. It is the first user-level entry
@@ -240,6 +245,7 @@ export function doctorDepsFromEnv(): DoctorDeps {
     homedir: os.homedir(),
     configPaths: configPaths(),
     userConfigPath: userConfigPath(),
+    pluginConfigPaths: pluginConfigPaths(),
     readFile: filePath => {
       try {
         return fs.readFileSync(filePath, "utf8");
