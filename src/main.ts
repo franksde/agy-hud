@@ -555,7 +555,7 @@ function usageSkipReason(cachePath: string, lockPath: string, lockToken: string,
     // No lock at all: this refresh does not own one.
   }
   if (lockToken === "" || owner !== lockToken) {
-    return { ok: false, message: "Skipped agy /usage: another refresh holds the lock." };
+    return { ok: false, message: "Skipped agy /usage: this refresh does not hold the lock." };
   }
   const retryAt = Date.parse(readRejectionMarker(cachePath)?.usageRetryAt ?? "");
   if (Number.isFinite(retryAt) && retryAt > now.getTime()) {

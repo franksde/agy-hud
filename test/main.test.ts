@@ -1409,4 +1409,15 @@ test("a background refresh runs /usage only while it still owns the lock", async
   fs.writeFileSync(lockPath, "token-a");
   assert.deepEqual((await runQuotaRefresh(fixture, args, rejected)).calls, { loopback: 0, usage: 1 });
   assert.equal(fs.existsSync(lockPath), false);
+
+  // The winner of a first refusal: no marker yet, so it probes loopback, is refused, still owns the
+  // lock, and falls through to /usage.
+  const first = homeFixture();
+  const firstLock = `${first.writePath}.lock`;
+  fs.mkdirSync(path.dirname(firstLock), { recursive: true });
+  fs.writeFileSync(firstLock, "token-a");
+  const winner = await runQuotaRefresh(first, args, rejected);
+  assert.deepEqual(winner.calls, { loopback: 1, usage: 1 });
+  assert.equal(winner.code, 0);
+  assert.equal(fs.existsSync(firstLock), false);
 });
