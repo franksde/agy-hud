@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染已验证至 1.2.11;loopback 配额探测已验证至 1.1.26,在 1.2.11 上无法通过认证(见[配额缓存](#配额缓存)),此时 HUD 显示 CLI 在状态栏 payload 里提供的配额。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染已验证至 1.2.11;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
@@ -324,9 +324,20 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 从 0.1.9 开始,配额刷新可复用配额缓存旁的 `quota_cache.json.server.json`(或 `<AGY_HUD_QUOTA_CACHE>.server.json`)。它只记录 PID、本地端口、进程身份(启动时间和可执行文件路径)及发现时间。每次复用前通过定向 `ps` 校验身份,省去全量进程扫描和 `lsof`;提示缓存五分钟后过期。请求失败或配额格式异常时,同一次刷新立即重新发现服务。需要 CSRF 的旧服务不写入提示缓存。配额刷新间隔、后台刷新和 working-to-idle 同帧校正均保持不变。
 
-在 Antigravity CLI 1.2.11(可能也包括更早的 1.2.x)上,`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令,所以刷新无法成功。`quota refresh` 会报出这个原因,而不是笼统的查询失败。此时 HUD 只用状态栏 payload 里的官方配额渲染,一轮回答刚结束时可能短暂滞后。旧缓存不会用来覆盖它:同帧校正只信任五分钟内的缓存。
+从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
 
-为了不在注定失败的探测上持续花时间,被拒后会在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里记下状态栏 payload 中的 CLI `version`。只要 payload 报的还是这个版本,HUD 就跳过同帧探测和后台探测。CLI 升级到新版本后,下一次重绘会重新探测:再次被拒就记下新版本,成功则删除这个文件并恢复正常刷新。payload 里没有版本号时从不跳过探测。手动执行 `quota refresh` 始终会真正探测,删除这个文件也会强制重试。
+在这样的 CLI 上,`quota refresh` 会改用官方只读命令 `agy -p /usage --output-format json`。它不启动 agent turn,不消耗 token 或配额,但会另起一个短暂的 `agy` 进程:约 7 秒,大部分时间在等 Google 的接口,CPU 约 1 秒,瞬时内存约 160 MB。HUD 从不在重绘时同步执行它,只在后台执行,并按下面的节奏:
+
+| 时机 | 缓存超过多久才执行 |
+| --- | --- |
+| 一轮进行中,或刚结束 | 60 秒 |
+| CLI 空闲(例如打字引起的重绘) | 5 分钟 |
+
+所有会话同一时间最多只有一个在执行。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,带这个标记的状态栏只渲染、不刷新。
+
+被拒的情况记在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里,包括状态栏 payload 中的 CLI `version` 和失败退避。只要 payload 报的还是这个版本,刷新就直接走 `/usage`。CLI 升级后,下一次刷新会重新尝试 loopback,loopback 成功就删除这个文件。payload 里没有版本号时从不算被拒,手动执行 `quota refresh` 也总是先试 loopback。其他 loopback 失败(比如没有正在运行的服务)从不改走 `/usage`,所以旧版 CLI 的行为完全不变。
+
+`/usage` 缓存里的配额桶和 payload 的 `quota` 字段结构相同。HUD 对 5 小时和周窗口分别取两份读数中更新的那份:`reset_time` 晚一分钟以上的是更新的窗口;同一窗口内剩余更少的是更新的读数。窗口已经重置的缓存桶不参与。
 
 期望的(已脱敏)缓存结构:
 
@@ -343,13 +354,27 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 }
 ```
 
+`/usage` 刷新写入的则是 payload 的配额桶结构:
+
+```json
+{
+  "timestamp": "2026-09-25T14:20:28Z",
+  "source": "usage",
+  "models": {},
+  "quota": {
+    "gemini-5h": { "remaining_fraction": 0.867, "reset_time": "2026-09-25T14:51:03Z" },
+    "gemini-weekly": { "remaining_fraction": 0.853, "reset_time": "2026-09-30T06:16:21Z" }
+  }
+}
+```
+
 如果配额数据缺失,HUD 会直接省略 usage 区块,不会显示伪造的 limit。官方 quota payload 可以提供实时的 `reset_in_seconds`,所以双窗口配额会显示每个窗口自己的相对刷新倒计时。本地 fallback cache 仍然来自本地 API 的 `resetTime` 字段,并以本地时钟时间显示。
 
 ## 隐私与安全
 
 `agy-hud statusline` 从标准输入以及本地可选的配置/缓存文件渲染。它不会向外部传输状态栏 payload 数据。配额刷新只会访问本地 Antigravity loopback 服务。
 
-`agy-hud quota refresh` 只访问 loopback 上的本地 Antigravity 服务,不会打印 CSRF token、cookie 或原始 probe 响应。
+`agy-hud quota refresh` 只访问 loopback 上的本地 Antigravity 服务,或执行 `agy -p /usage`;不会打印 CSRF token、cookie、原始 probe 响应或 `/usage` 的错误文本。`/usage` 由 agy 用你自己的登录访问 Google,和 CLI 平时做的一样,agy-hud 本身不发任何网络请求。
 
 渲染器刻意不打印敏感的状态栏字段,包括邮箱、session ID、会话 ID、transcript 路径、token、CSRF 值、cookie、密钥以及完整的工作区路径。git 分支检测直接读取 `.git/HEAD`,不会调用 `git`。
 

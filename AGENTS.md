@@ -56,7 +56,7 @@ If the live CLI still shows old output, first check that this installed bundle w
 ## HUD Behavior Notes
 
 - `statusline` must stay fast. It should only read stdin, local config, local cache, and cheap local git metadata.
-- Quota probing must contact only Antigravity loopback services and must write sanitized cache data.
+- Quota probing must contact only Antigravity loopback services, or run the official `agy -p /usage` where loopback is refused (see below), and must write sanitized cache data. agy-hud itself never opens a network connection.
 - The quota cache path defaults to `$XDG_CACHE_HOME/agy-hud/quota_cache.json`, falling back to `$HOME/.cache/agy-hud/quota_cache.json`. Writes always go there. Reads fall back to the pre-0.1.8 path under `$HOME/.gemini/antigravity-cli/scratch/agy-hud/` when no new cache exists yet, so upgrades are seamless.
 - Quota reset comes from the local API `quotaInfo.resetTime`. Display it as an absolute local clock time, not as a live countdown, because a status-line hook cannot update already-rendered text without a redraw.
 - The quota bar is a continuous progress bar derived from the exact quota fraction, 8 cells for a single window and 10 per window when both are shown (`usageBar` in `src/statusline.ts`). It is not five discrete 20% cells; an earlier revision of this file said otherwise, and that never matched the code, the tests, or the READMEs.
@@ -109,16 +109,22 @@ Also note that `statusline` only runs when the CLI redraws. There is no such thi
 during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
 quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
 
-Since Antigravity CLI 1.2.x (verified on 1.2.11), the `agy` loopback server answers `GetUserStatus` with
-`401 missing CSRF token`, and the status-line command is not given that token, so every refresh fails.
-`quota refresh` reports that cause (`probeAuthRejected` in `src/quotaProbe.ts`), and the rejection is
-recorded against the payload's CLI `version` in `<cache>.auth-rejected.json` (`recordAuthRejection` in
-`src/main.ts`). This is the one sanctioned way to probe less: the rule above assumes a probe that can
-succeed, and one the CLI refuses outright only adds latency to the redraw at the end of every turn.
-Keep the pause keyed to the exact CLI version, so an update retries by itself; never make it
-permanent, time-based, or triggered by any failure other than an authentication rejection. The probe
-itself stays: it still serves older CLIs, and a documented token route would restore it. Do not
-scrape the token from the CLI binary, its memory or another process's environment.
+From Antigravity CLI 1.2.2 on (verified on 1.2.11), the `agy` loopback server answers `GetUserStatus`
+with `401 missing CSRF token`, and nothing the CLI hands a plugin carries that token: not the
+status-line environment, not hook environments or hook stdin (both measured 2026-09-25). The refusal
+is recorded per CLI version in `<cache>.auth-rejected.json`, and refreshes for that version run the
+official `agy -p /usage --output-format json` instead (`src/usageCommand.ts`). The design and the
+measurements behind it are in `docs/superpowers/specs/2026-09-25-usage-command-quota-refresh-design.md`.
+
+- `/usage` spends no quota but starts a whole `agy` for about 7 s. Keep it out of every redraw path,
+  keep the single global lock, and keep its floors (60 s active, 5 minutes idle) and backoff. They
+  are the answer to "not too often, but never frozen through a long task".
+- The `agy` it starts renders the status line as well. `AGY_HUD_NESTED=1` is what stops that nested
+  render from refreshing again or overwriting the session's refresh state. Never drop it.
+- Fall back to `/usage` only on an authentication refusal. Any other loopback failure must behave as
+  before, so older CLIs are untouched.
+- Do not scrape the token from the CLI binary, its memory or another process's environment. CodexBar
+  and its community looked hard for a sanctioned route (steipete/CodexBar#3586) and found none.
 
 Make each probe cheaper rather than rarer. Since 0.1.9, a credential-free `.server.json` hint can
 reuse a loopback port after a targeted `ps` check verifies the same PID, start time and executable.

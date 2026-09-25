@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.11; the loopback quota probe is verified through 1.1.26 and cannot authenticate on 1.2.11 (see [Quota Cache](#quota-cache)), where the HUD shows the quota the CLI passes in the status-line payload. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.11; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
@@ -327,9 +327,20 @@ The refresh command supports both known Antigravity local-server shapes: the cur
 
 Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to the quota cache (or `<AGY_HUD_QUOTA_CACHE>.server.json`). It holds only a PID, local port, process identity (start time and executable path), and discovery timestamp. Each reuse checks the process identity with a targeted `ps` call, avoiding a full process scan and `lsof`; hints expire after five minutes. Failure or malformed quota causes discovery in the same refresh. Legacy servers requiring CSRF are never cached in this hint. Quota refresh intervals, background refreshes and working-to-idle same-frame correction are unchanged.
 
-On Antigravity CLI 1.2.11, and possibly earlier 1.2.x releases, the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token, so the refresh cannot succeed. `quota refresh` reports this cause instead of a generic query failure. The HUD then renders the official quota from the status-line payload alone, which can lag for a moment right after a turn settles. An old cache is not used to override it: the same-frame correction only trusts a cache younger than five minutes.
+From Antigravity CLI 1.2.2 on (boundary measured by [CodexBar](https://github.com/steipete/CodexBar/pull/3685); verified here on 1.2.11), the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token. The status-line payload still carries the official quota, but it lags: during a turn it does not move at all, and a turn's usage booked after the CLI's end-of-turn fetch stays invisible until the next turn ends. Measured on 1.2.11, an idle session showed a 5h value 25 minutes out of date.
 
-So the HUD does not keep paying for a probe that cannot succeed, a rejection is recorded in `quota_cache.json.auth-rejected.json` (or `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`) together with the CLI `version` from the status-line payload. While the payload reports that same version, the HUD skips both the same-frame and the background probe. When the CLI updates to a new version, the next redraw probes again; a new rejection is recorded for the new version, and a success deletes the file and restores normal refreshes. A payload without a version never skips the probe. A manual `quota refresh` always probes, and deleting the file forces a retry.
+On such a CLI, `quota refresh` falls back to the official read-only command `agy -p /usage --output-format json`. It starts no agent turn and spends no tokens or quota, but it does start a separate, short-lived `agy` process: about 7 s, most of it waiting on Google's API, about 1 s of CPU and a transient 160 MB. The HUD never runs it during a redraw, only in the background, and paces it:
+
+| When | Runs if the cache is older than |
+| --- | --- |
+| A turn is running, or has just settled | 60 s |
+| The CLI sits idle (a redraw from typing, for example) | 5 minutes |
+
+Only one run happens at a time across every session. A failing run backs off for 60 s, doubling to 10 minutes. The `agy` it starts renders the status line too; agy-hud marks that child with `AGY_HUD_NESTED=1`, and a status line carrying the mark only renders.
+
+The refusal is recorded in `quota_cache.json.auth-rejected.json` (or `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`) together with the CLI `version` from the status-line payload, plus the backoff. While the payload reports that version, refreshes go straight to `/usage`. After a CLI update the next refresh tries loopback again, and a loopback success deletes the file. A payload without a version never counts as refused, and a manual `quota refresh` always tries loopback first. Any other loopback failure, such as no running server, never falls back to `/usage`, so older CLIs behave exactly as before.
+
+A `/usage` cache holds the same buckets as the payload's `quota` field. For each window, 5h and weekly, the HUD shows the fresher of the two readings: a `reset_time` more than a minute later is a newer window, and within one window the lower remainder is the newer reading. Cached buckets whose window has already reset are ignored.
 
 Expected sanitized cache shape:
 
@@ -346,13 +357,27 @@ Expected sanitized cache shape:
 }
 ```
 
+A `/usage` refresh writes the payload's bucket shape instead:
+
+```json
+{
+  "timestamp": "2026-09-25T14:20:28Z",
+  "source": "usage",
+  "models": {},
+  "quota": {
+    "gemini-5h": { "remaining_fraction": 0.867, "reset_time": "2026-09-25T14:51:03Z" },
+    "gemini-weekly": { "remaining_fraction": 0.853, "reset_time": "2026-09-30T06:16:21Z" }
+  }
+}
+```
+
 If quota data is missing, the HUD omits the usage segment instead of showing a fake limit. Official quota payloads can include live `reset_in_seconds`, so dual-window quota displays show per-window relative reset durations. The local fallback cache still derives reset from the local API's `resetTime` field and displays it as a local clock time.
 
 ## Privacy And Security
 
-`agy-hud statusline` renders from stdin plus local optional config/cache files. It does not transmit status-line payload data externally. Quota refreshes contact only the local Antigravity loopback server.
+`agy-hud statusline` renders from stdin plus local optional config/cache files. It does not transmit status-line payload data externally. Quota refreshes contact only the local Antigravity loopback server, or, where the CLI refuses that, run the official `agy -p /usage` command, which talks to Google with your own sign-in exactly as the CLI always does. agy-hud itself makes no network request.
 
-`agy-hud quota refresh` contacts only the local Antigravity server on loopback and does not print CSRF tokens, cookies, or raw probe responses.
+`agy-hud quota refresh` contacts only the local Antigravity server on loopback, or runs `agy -p /usage`, and does not print CSRF tokens, cookies, raw probe responses, or `/usage` error text.
 
 The renderer intentionally avoids printing sensitive status-line fields, including email, session IDs, conversation IDs, transcript paths, tokens, CSRF values, cookies, keys, and full workspace paths. Git branch detection reads `.git/HEAD` directly and does not run `git`.
 
