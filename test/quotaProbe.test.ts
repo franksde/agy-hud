@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildQuotaCache, parseAgyServerInfos, parseLanguageServerInfo, parseListeningPorts, refreshQuota } from "../src/quotaProbe";
+import http from "node:http";
+import { AddressInfo } from "node:net";
+import {
+  buildQuotaCache, parseAgyServerInfos, parseLanguageServerInfo, parseListeningPorts, probeAuthRejected, queryLanguageServer,
+  refreshQuota
+} from "../src/quotaProbe";
 
 test("parseLanguageServerInfo extracts pid and csrf token", () => {
   const ps = [
@@ -385,5 +390,44 @@ test("unavailable process identity disables hints but not full quota discovery",
     assert.deepEqual(calls.requests, [2222]);
     assert.match(files["/tmp/quota-no-identity-test.json"], /"remainingFraction": 0.4/);
     assert.equal(files["/tmp/quota-no-identity-test.json.server.json"], undefined);
+  }
+});
+
+// Antigravity CLI 1.2.x (seen on 1.2.11) answers GetUserStatus on the agy loopback ports with
+// 401 "missing CSRF token", and the status line never receives that token. The probe must say so
+// instead of reporting a generic query failure that reads like a network problem.
+test("reports an authentication rejection as its own cause", async () => {
+  const { runtime } = hintRuntime();
+  runtime.lsof = () => "agy 222 user 9u IPv4 0 TCP 127.0.0.1:1111 (LISTEN)\nagy 222 user 9u IPv4 0 TCP 127.0.0.1:2222 (LISTEN)";
+  runtime.request = async () => probeAuthRejected;
+  const result = await refreshQuota("/tmp/quota-auth-test.json", runtime);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /rejected .*unauthenticated/i);
+  assert.match(result.message, /CSRF/);
+  assert.match(result.message, /payload/);
+});
+
+test("a rejecting listener does not hide quota from another port", async () => {
+  const { runtime, calls } = hintRuntime();
+  runtime.lsof = () => "agy 222 user 9u IPv4 0 TCP 127.0.0.1:1111 (LISTEN)\nagy 222 user 9u IPv4 0 TCP 127.0.0.1:2222 (LISTEN)";
+  runtime.request = async port => {
+    calls.requests.push(port);
+    return port === 1111 ? probeAuthRejected : sampleRawStatus("Gemini 3.8 Flash (High)", 0.4);
+  };
+  assert.equal((await refreshQuota("/tmp/quota-auth-mixed-test.json", runtime)).ok, true);
+  assert.deepEqual(calls.requests, [1111, 2222]);
+});
+
+test("queryLanguageServer maps an HTTP 401 reply to the authentication rejection", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ code: "unauthenticated", message: "missing CSRF token" }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as AddressInfo).port;
+    assert.equal(await queryLanguageServer(port, ""), probeAuthRejected);
+  } finally {
+    server.close();
   }
 });

@@ -109,6 +109,12 @@ Also note that `statusline` only runs when the CLI redraws. There is no such thi
 during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
 quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
 
+Since Antigravity CLI 1.2.x (verified on 1.2.11), the `agy` loopback server answers `GetUserStatus` with
+`401 missing CSRF token`, and the status-line command is not given that token, so every refresh fails.
+`quota refresh` reports that cause (`probeAuthRejected` in `src/quotaProbe.ts`). This is not a license
+to drop the probe either: it still serves older CLIs, and a documented token route would restore it.
+Do not scrape the token from the CLI binary, its memory or another process's environment.
+
 Make each probe cheaper rather than rarer. Since 0.1.9, a credential-free `.server.json` hint can
 reuse a loopback port after a targeted `ps` check verifies the same PID, start time and executable.
 Hints expire after five minutes; failed or malformed replies fall back to `ps aux` / `lsof`

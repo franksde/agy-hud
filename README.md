@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer, verified through 1.1.26. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.11; the loopback quota probe is verified through 1.1.26 and cannot authenticate on 1.2.11 (see [Quota Cache](#quota-cache)), where the HUD shows the quota the CLI passes in the status-line payload. The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+ available on `PATH`
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
@@ -326,6 +326,8 @@ node <plugin-root>/dist/agy-hud.js quota refresh
 The refresh command supports both known Antigravity local-server shapes: the current `agy` loopback server and the older `language_server --csrf_token ...` process, in that order. If a CSRF token is present, it is used only for the loopback `GetUserStatus` request. The command stores only the sanitized cache shape below. Normal `statusline` rendering reads this cache and refreshes it when active work settles. It also uses stale-cache refreshes as a fallback. If the cache still looks untouched (`100% left` for every model), status-line activity such as a new conversation or agent state change can trigger an immediate debounced background refresh.
 
 Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to the quota cache (or `<AGY_HUD_QUOTA_CACHE>.server.json`). It holds only a PID, local port, process identity (start time and executable path), and discovery timestamp. Each reuse checks the process identity with a targeted `ps` call, avoiding a full process scan and `lsof`; hints expire after five minutes. Failure or malformed quota causes discovery in the same refresh. Legacy servers requiring CSRF are never cached in this hint. Quota refresh intervals, background refreshes and working-to-idle same-frame correction are unchanged.
+
+On Antigravity CLI 1.2.11, and possibly earlier 1.2.x releases, the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token, so the refresh cannot succeed. `quota refresh` reports this cause instead of a generic query failure. The HUD then renders the official quota from the status-line payload alone, which can lag for a moment right after a turn settles. An old cache is not used to override it: the same-frame correction only trusts a cache younger than five minutes.
 
 Expected sanitized cache shape:
 

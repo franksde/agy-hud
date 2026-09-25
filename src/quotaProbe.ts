@@ -28,6 +28,10 @@ interface ServerHint {
   discoveredAt: string;
 }
 
+// A listener that answered GetUserStatus with HTTP 401. Antigravity CLI 1.2.x (seen on 1.2.11)
+// requires a CSRF token on its agy loopback ports, and the status line is never given it.
+export const probeAuthRejected: unique symbol = Symbol("agy-hud.probeAuthRejected");
+
 export interface RefreshResult {
   ok: boolean;
   message: string;
@@ -145,6 +149,7 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
 
   let sawPort = false;
   let sawResponse = false;
+  let sawAuthRejection = false;
   for (const info of candidates) {
     // Identity is required only for hint reuse. If targeted inspection fails, full discovery
     // must remain available; the optional optimization must never disable quota refreshes.
@@ -160,6 +165,10 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
     }
     for (const port of ports) {
       const rawResponse = await tryRequest(runtime, port, info.csrfToken);
+      if (rawResponse === probeAuthRejected) {
+        sawAuthRejection = true;
+        continue;
+      }
       if (rawResponse) sawResponse = true;
       const built = buildQuotaCache(rawResponse, runtime.now());
       if (built) {
@@ -173,6 +182,14 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
   }
   if (!sawPort) {
     return { ok: false, message: "No listening ports found on quota server." };
+  }
+  if (!sawResponse && sawAuthRejection) {
+    return {
+      ok: false,
+      message: "The quota server rejected GetUserStatus as unauthenticated (missing CSRF token). " +
+        "Newer Antigravity CLI releases require a token the status line does not receive, " +
+        "so the HUD shows the quota from the status-line payload only."
+    };
   }
   if (!sawResponse) {
     return { ok: false, message: "Failed to query GetUserStatus from all identified ports." };
@@ -253,7 +270,7 @@ function defaultRuntime(): ProbeRuntime {
   };
 }
 
-async function queryLanguageServer(port: number, csrfToken: string): Promise<unknown | null> {
+export async function queryLanguageServer(port: number, csrfToken: string): Promise<unknown | null> {
   const endpoint = `/exa.language_server_pb.LanguageServerService/GetUserStatus`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -293,6 +310,10 @@ function requestJson(
       const chunks: Buffer[] = [];
       res.on("data", chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => {
+        if (res.statusCode === 401) {
+          resolve(probeAuthRejected);
+          return;
+        }
         if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
           resolve(null);
           return;

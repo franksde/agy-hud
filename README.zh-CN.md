@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本,已验证至 1.1.26。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染已验证至 1.2.11;loopback 配额探测已验证至 1.1.26,在 1.2.11 上无法通过认证(见[配额缓存](#配额缓存)),此时 HUD 显示 CLI 在状态栏 payload 里提供的配额。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - `PATH` 中可用的 Node.js 18+
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
@@ -323,6 +323,8 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 刷新命令兼容两种已知的 Antigravity 本地服务形态:当前的 `agy` loopback 服务,以及旧版 `language_server --csrf_token ...` 进程,按这个顺序尝试。如果存在 CSRF token,它只会被用于 loopback `GetUserStatus` 请求。命令最终只保存下面这种脱敏缓存。正常的 `statusline` 渲染会读取该缓存,并在 active work 结束时刷新;同时保留过期缓存刷新作为兜底。如果缓存仍然看起来完全未消耗(所有模型都是 `100% left`),新的会话或 agent 状态变化也会触发一次带去抖的即时后台刷新。
 
 从 0.1.9 开始,配额刷新可复用配额缓存旁的 `quota_cache.json.server.json`(或 `<AGY_HUD_QUOTA_CACHE>.server.json`)。它只记录 PID、本地端口、进程身份(启动时间和可执行文件路径)及发现时间。每次复用前通过定向 `ps` 校验身份,省去全量进程扫描和 `lsof`;提示缓存五分钟后过期。请求失败或配额格式异常时,同一次刷新立即重新发现服务。需要 CSRF 的旧服务不写入提示缓存。配额刷新间隔、后台刷新和 working-to-idle 同帧校正均保持不变。
+
+在 Antigravity CLI 1.2.11(可能也包括更早的 1.2.x)上,`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令,所以刷新无法成功。`quota refresh` 会报出这个原因,而不是笼统的查询失败。此时 HUD 只用状态栏 payload 里的官方配额渲染,一轮回答刚结束时可能短暂滞后。旧缓存不会用来覆盖它:同帧校正只信任五分钟内的缓存。
 
 期望的(已脱敏)缓存结构:
 

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added `show_title`, off by default, to show the `conversation_title` that Antigravity CLI 1.1.27+ passes to status-line scripts. The title is reduced to one plain line with control characters and bidi overrides removed, so it cannot break the layout or send sequences to the terminal, is clipped to 24 columns, and is the first segment dropped on a narrow terminal.
+- `quota refresh` names the cause when the loopback server rejects the probe as unauthenticated. On Antigravity CLI 1.2.11, and possibly earlier 1.2.x releases, the `agy` server answers `GetUserStatus` with `401 missing CSRF token` and the status line is not given that token, so the probe cannot refresh; it used to report a generic "Failed to query GetUserStatus". The HUD falls back to the quota in the status-line payload. Both READMEs state this, and verified compatibility is now through 1.2.11 for install, wiring and rendering.
 - `doctor` warns when the config in effect lives inside the plugin directory. Antigravity CLI 1.1.28 made `agy plugin install` replace a plugin's directory exactly, so a `config.json` next to the bundle or in the plugin root is deleted by the next reinstall. The human report names the user-level path to move it to; `doctor --json` adds `configInPluginDir` and `userConfigPath`. Both READMEs recommend the user-level config path and warn about reinstalls.
 
 ## 0.1.10 — 2026-09-04
