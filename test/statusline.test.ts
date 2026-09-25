@@ -658,7 +658,7 @@ test("a usage cache with less left in the same window wins, for the weekly windo
     { "gemini-5h": { remaining_fraction: 0.8, reset_time: fiveHourReset },
       "gemini-weekly": { remaining_fraction: 0.88, reset_time: weeklyReset } }
   );
-  assert.match(line, /Usage \S+ 80% .*\| .*88%/);
+  assert.match(line, /Usage \S+ 80% \(↻ 4h 29m\) \| .*88% \(↻ 3d 21h\)/, "cached windows show the same countdown style");
 });
 
 test("the payload wins a window where it already shows less left", () => {

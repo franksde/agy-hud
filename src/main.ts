@@ -3,8 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { defaultConfig, loadFromPaths, Config } from "./config";
-import { Cache, load as loadQuota, matchModel } from "./quota";
+import { Cache, CachedQuotaBucket, load as loadQuota, matchModel } from "./quota";
 import { RefreshResult, refreshQuota } from "./quotaProbe";
+import { queryUsage, UsageOutcome } from "./usageCommand";
 import { branch as gitBranch } from "./gitinfo";
 import { Payload, render } from "./statusline";
 import { DoctorDeps, collectDoctorReport, formatDoctorReport } from "./doctor";
@@ -213,6 +214,7 @@ interface CliDeps {
   stdout?: WriteFn;
   stderr?: WriteFn;
   refreshQuota?: (cachePath: string) => Promise<RefreshResult>;
+  usageQuota?: () => Promise<UsageOutcome>;
   doctorDeps?: Partial<DoctorDeps>;
 }
 
@@ -284,7 +286,14 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
+    if (process.env.AGY_HUD_NESTED === "1") {
+      // The status line of the agy that a /usage refresh started. It must not refresh again, and its
+      // print-mode agent states must not overwrite the interactive session's refresh state.
+      stdout(`${renderStatusline(raw, cfg, ok ? cache : null)}\n`);
+      return 0;
+    }
     const cliVersion = safeCliVersion(payload?.version);
+    // Loopback is refused for this CLI version, so quota comes from background /usage runs instead.
     const probeRejected = authRejectedFor(cachePath, cliVersion);
     const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(
       cachePath,
@@ -307,9 +316,19 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
       const lockPath = cachePath + ".lock";
       const cliVersion = args[2] === "--cli-version" ? safeCliVersion(args[3]) : "";
       try {
-        // A manual refresh always probes, so it can also confirm that a recorded rejection still holds.
-        const result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
-        recordAuthRejection(cachePath, result, cliVersion);
+        // Loopback first, as it is cheaper. Only a refusal falls back to /usage, so a CLI whose loopback
+        // server is merely not running behaves exactly as before. A version already known to refuse
+        // skips straight to /usage; a manual refresh names no version and always tries loopback.
+        let result: RefreshResult | null = null;
+        if (!authRejectedFor(cachePath, cliVersion)) {
+          result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
+          recordAuthRejection(cachePath, result, cliVersion);
+        }
+        if (result === null || (!result.ok && result.authRejected)) {
+          const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
+          recordUsageOutcome(cachePath, cliVersion, outcome.ok);
+          result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+        }
         stderr(`[quota_probe] ${result.message}\n`);
         if (result.ok && result.summary) {
           stdout(`${result.summary}\n`);
@@ -434,11 +453,17 @@ function triggerBackgroundRefreshIfNeeded(
   const nextState = mergeStatuslineRefreshState(prevState, payload, activityRefresh, now);
   saveStatuslineRefreshState(statePath, nextState);
 
-  if (probeRejected || (!quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh)) {
+  const lockPath = cachePath + ".lock";
+  if (probeRejected) {
+    if (usageRefreshDue(cache, payload, prevState, readRejectionMarker(cachePath), now) && takeUsageLock(lockPath, now)) {
+      spawnQuotaRefresh(cliVersion);
+    }
+    return;
+  }
+  if (!quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh) {
     return;
   }
 
-  const lockPath = cachePath + ".lock";
   try {
     if (fs.existsSync(lockPath)) {
       const stat = fs.statSync(lockPath);
@@ -448,10 +473,16 @@ function triggerBackgroundRefreshIfNeeded(
       }
     }
     fs.writeFileSync(lockPath, new Date().toISOString(), "utf8");
+    spawnQuotaRefresh(cliVersion);
+  } catch {
+    // ignore
+  }
+}
 
-    const nodePath = process.argv[0];
+function spawnQuotaRefresh(cliVersion: string): void {
+  try {
     const args = [__filename, "quota", "refresh", ...(cliVersion ? ["--cli-version", cliVersion] : [])];
-    const child = spawn(nodePath, args, {
+    const child = spawn(process.argv[0], args, {
       detached: true,
       stdio: "ignore"
     });
@@ -459,6 +490,76 @@ function triggerBackgroundRefreshIfNeeded(
   } catch {
     // ignore
   }
+}
+
+// A /usage run starts a whole agy process for about 7 s, so it is paced more slowly than the loopback
+// probe: a 60 s floor while a turn runs or has just settled, 5 minutes while the CLI sits idle, and
+// no run at all while a failure backoff is pending.
+const usageActiveFloorMs = 60 * 1000;
+const usageIdleFloorMs = 5 * 60 * 1000;
+const usageLockStaleMs = 60 * 1000;
+
+function usageRefreshDue(
+  cache: Cache | null,
+  payload: Payload | null,
+  prevState: StatuslineRefreshState | null,
+  marker: RejectionMarker | null,
+  now: Date
+): boolean {
+  const retryAt = Date.parse(marker?.usageRetryAt ?? "");
+  if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
+    return false;
+  }
+  const agentState = normalizeAgentState(payload?.agent_state);
+  const prevAgentState = prevState?.agentState ?? "";
+  const active = agentState !== "idle" || (prevAgentState !== "" && prevAgentState !== "idle");
+  const cacheTime = Date.parse(cache?.timestamp ?? "");
+  const age = Number.isFinite(cacheTime) ? now.getTime() - cacheTime : Infinity;
+  return age > (active ? usageActiveFloorMs : usageIdleFloorMs);
+}
+
+// One /usage run at a time across every session. The lock is taken with an exclusive create; one
+// older than the longest possible run (45 s) belongs to a refresh that died, and is taken over.
+function takeUsageLock(lockPath: string, now: Date): boolean {
+  try {
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  } catch {
+    return false;
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      fs.writeFileSync(lockPath, now.toISOString(), { encoding: "utf8", flag: "wx", mode: 0o600 });
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        return false;
+      }
+      try {
+        if (now.getTime() - fs.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
+          return false;
+        }
+        fs.rmSync(lockPath, { force: true });
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function saveUsageCache(cachePath: string, quota: Record<string, CachedQuotaBucket>): RefreshResult {
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true, mode: 0o700 });
+    const cache: Cache = { timestamp: new Date().toISOString(), source: "usage", models: {}, quota };
+    fs.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.chmodSync(cachePath, 0o600);
+  } catch (error) {
+    return { ok: false, message: `Could not write the quota cache: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const summary = Object.entries(quota)
+    .map(([key, bucket]) => `${key} ${Math.round((bucket.remaining_fraction ?? 0) * 100)}% left`)
+    .join(", ");
+  return { ok: true, message: `Cached quota from agy /usage to ${cachePath}`, cachePath, summary };
 }
 
 export function quotaCacheNeedsRefresh(cache: Cache | null, now: Date = new Date()): boolean {
@@ -500,35 +601,76 @@ function authRejectedPath(cachePath: string): string {
   return cachePath === "" ? "" : `${cachePath}.auth-rejected.json`;
 }
 
-function authRejectedFor(cachePath: string, cliVersion: string): boolean {
+interface RejectionMarker {
+  cliVersion: string;
+  rejectedAt: string;
+  // Consecutive /usage failures and when the next run may start.
+  usageFailures?: number;
+  usageRetryAt?: string;
+}
+
+function readRejectionMarker(cachePath: string): RejectionMarker | null {
   const markerPath = authRejectedPath(cachePath);
-  if (markerPath === "" || cliVersion === "") {
-    return false;
+  if (markerPath === "") {
+    return null;
   }
   try {
-    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8")) as { cliVersion?: unknown };
-    return marker.cliVersion === cliVersion;
+    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8")) as Partial<RejectionMarker>;
+    if (typeof marker.cliVersion !== "string") {
+      return null;
+    }
+    return {
+      cliVersion: marker.cliVersion,
+      rejectedAt: typeof marker.rejectedAt === "string" ? marker.rejectedAt : "",
+      usageFailures: Number.isInteger(marker.usageFailures) && (marker.usageFailures ?? 0) > 0 ? marker.usageFailures : undefined,
+      usageRetryAt: typeof marker.usageRetryAt === "string" ? marker.usageRetryAt : undefined
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
-function recordAuthRejection(cachePath: string, result: RefreshResult, cliVersion: string): void {
+function writeRejectionMarker(cachePath: string, marker: RejectionMarker): void {
   const markerPath = authRejectedPath(cachePath);
-  if (markerPath === "") {
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(markerPath, `${JSON.stringify(marker)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
+function authRejectedFor(cachePath: string, cliVersion: string): boolean {
+  return cliVersion !== "" && readRejectionMarker(cachePath)?.cliVersion === cliVersion;
+}
+
+function recordAuthRejection(cachePath: string, result: RefreshResult, cliVersion: string): void {
+  if (authRejectedPath(cachePath) === "") {
     return;
   }
   try {
     if (result.ok) {
-      fs.rmSync(markerPath, { force: true });
-    } else if (result.authRejected && cliVersion !== "") {
-      fs.mkdirSync(path.dirname(markerPath), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(markerPath, `${JSON.stringify({ cliVersion, rejectedAt: new Date().toISOString() })}\n`, {
-        encoding: "utf8", mode: 0o600
-      });
+      fs.rmSync(authRejectedPath(cachePath), { force: true });
+    } else if (result.authRejected && cliVersion !== "" && !authRejectedFor(cachePath, cliVersion)) {
+      writeRejectionMarker(cachePath, { cliVersion, rejectedAt: new Date().toISOString() });
     }
   } catch {
-    // Losing the marker only costs another probe; it can never suppress one wrongly.
+    // Losing the marker only costs another loopback probe; it can never suppress a refresh wrongly.
+  }
+}
+
+// Backs /usage off after a failure: 60 s, doubling to a 10-minute cap. A success clears it.
+function recordUsageOutcome(cachePath: string, cliVersion: string, ok: boolean): void {
+  const marker = readRejectionMarker(cachePath);
+  if (!marker || cliVersion === "" || marker.cliVersion !== cliVersion) {
+    return;
+  }
+  try {
+    if (ok) {
+      writeRejectionMarker(cachePath, { cliVersion: marker.cliVersion, rejectedAt: marker.rejectedAt });
+      return;
+    }
+    const failures = (marker.usageFailures ?? 0) + 1;
+    const delayMs = Math.min(60 * 1000 * 2 ** (failures - 1), 10 * 60 * 1000);
+    writeRejectionMarker(cachePath, { ...marker, usageFailures: failures, usageRetryAt: new Date(Date.now() + delayMs).toISOString() });
+  } catch {
+    // Losing the backoff only costs an earlier retry.
   }
 }
 

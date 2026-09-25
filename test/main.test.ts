@@ -1120,7 +1120,7 @@ test("a same-frame auth rejection is recorded against the CLI version", async ()
   assert.equal(fs.statSync(authRejectedPath(fixture)).mode & 0o077, 0, "the marker must stay private like the cache");
 });
 
-test("a recorded rejection for the running CLI version skips both same-frame and background probes", async () => {
+test("a recorded rejection moves the running CLI version to background /usage refreshes", async () => {
   const fixture = homeFixture();
   writeCache(fixture.writePath, 0.4, 24 * 60 * 60 * 1000);
   writeRefreshState(fixture.writePath, "working");
@@ -1128,9 +1128,10 @@ test("a recorded rejection for the running CLI version skips both same-frame and
 
   const calls = await runIdleTransition(fixture, versionedPayload("1.2.11"), { ok: true, message: "refreshed" });
 
-  assert.equal(calls, 0, "the same-frame probe must be skipped");
-  await new Promise(resolve => setTimeout(resolve, 200));
-  assert.equal(fs.existsSync(fixture.markerPath), false, "a stale cache must not spawn a background probe either");
+  assert.equal(calls, 0, "the same-frame loopback probe must be skipped");
+  assert.equal(await waitForSpawn(fixture.markerPath), true, "the stale cache must start a background refresh");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.match(fs.readFileSync(fixture.markerPath, "utf8"), /quota refresh --cli-version 1\.2\.11/);
 });
 
 test("a CLI upgrade retries the probe despite a rejection recorded for the old version", async () => {
@@ -1173,28 +1174,149 @@ test("an unsafe CLI version is not passed to the background probe", async () => 
   assert.doesNotMatch(fs.readFileSync(fixture.markerPath, "utf8"), /--cli-version/);
 });
 
-test("quota refresh records a rejection only when told the CLI version, and a success clears it", async () => {
-  const fixture = homeFixture();
-  const run = (args: string[], result: { ok: boolean; message: string; authRejected?: boolean }) =>
-    runInHome(fixture, () => runCli(args, { stdout: () => {}, stderr: () => {}, refreshQuota: async () => result }));
+type Outcome = { ok: boolean; message: string; authRejected?: boolean };
+type UsageOutcomeStub = { ok: true; quota: Record<string, { remaining_fraction: number; reset_time: string }> } | { ok: false; message: string };
 
-  assert.equal(await run(["quota", "refresh"], { ok: false, message: "rejected", authRejected: true }), 2);
+const usageOk: UsageOutcomeStub = { ok: true, quota: { "gemini-5h": { remaining_fraction: 0.7, reset_time: "2099-01-01T00:00:00Z" } } };
+const usageFail: UsageOutcomeStub = { ok: false, message: "agy /usage failed: exit 1." };
+
+async function runQuotaRefresh(fixture: HomeFixture, args: string[], loopback: Outcome, usage: UsageOutcomeStub = usageOk) {
+  const calls = { loopback: 0, usage: 0 };
+  const code = await runInHome(fixture, () => runCli(["quota", "refresh", ...args], {
+    stdout: () => {}, stderr: () => {},
+    refreshQuota: async () => { calls.loopback += 1; return loopback; },
+    usageQuota: async () => { calls.usage += 1; return usage; }
+  }));
+  return { code, calls };
+}
+
+function readMarker(fixture: HomeFixture): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(authRejectedPath(fixture), "utf8"));
+}
+
+const rejected: Outcome = { ok: false, message: "rejected", authRejected: true };
+
+test("quota refresh falls back to /usage after a rejection and records it only for a known CLI version", async () => {
+  const fixture = homeFixture();
+
+  const manual = await runQuotaRefresh(fixture, [], rejected);
+  assert.equal(manual.code, 0);
+  assert.deepEqual(manual.calls, { loopback: 1, usage: 1 });
+  const cache = JSON.parse(fs.readFileSync(fixture.writePath, "utf8"));
+  assert.equal(cache.source, "usage");
+  assert.equal(cache.quota["gemini-5h"].remaining_fraction, 0.7);
+  assert.equal(fs.statSync(fixture.writePath).mode & 0o077, 0, "the cache must stay private");
   assert.equal(fs.existsSync(authRejectedPath(fixture)), false, "without a version there is nothing to key the rejection on");
 
-  assert.equal(await run(["quota", "refresh", "--cli-version", "1.2.11"], { ok: false, message: "rejected", authRejected: true }), 2);
-  assert.equal(JSON.parse(fs.readFileSync(authRejectedPath(fixture), "utf8")).cliVersion, "1.2.11");
+  assert.equal((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected)).code, 0);
+  assert.equal(readMarker(fixture).cliVersion, "1.2.11");
 
-  assert.equal(await run(["quota", "refresh"], { ok: true, message: "refreshed" }), 0);
-  assert.equal(fs.existsSync(authRejectedPath(fixture)), false, "a successful probe proves the rejection no longer holds");
+  assert.equal((await runQuotaRefresh(fixture, [], { ok: true, message: "refreshed" })).code, 0);
+  assert.equal(fs.existsSync(authRejectedPath(fixture)), false, "a successful loopback probe proves the rejection no longer holds");
 });
 
-test("a manual quota refresh always probes, even for a rejected CLI version", async () => {
+test("a recorded rejection sends quota refresh straight to /usage, but only for that CLI version", async () => {
   const fixture = homeFixture();
   writeAuthRejected(fixture, "1.2.11");
+  assert.deepEqual((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected)).calls, { loopback: 0, usage: 1 });
+  assert.deepEqual((await runQuotaRefresh(fixture, ["--cli-version", "1.2.12"], rejected)).calls, { loopback: 1, usage: 1 });
+  assert.deepEqual((await runQuotaRefresh(fixture, [], { ok: true, message: "refreshed" })).calls, { loopback: 1, usage: 0 });
+});
+
+test("a loopback failure other than a rejection does not fall back to /usage", async () => {
+  const fixture = homeFixture();
+  const result = await runQuotaRefresh(fixture, ["--cli-version", "1.1.26"], { ok: false, message: "No running language_server or agy quota server found." });
+  assert.equal(result.code, 2);
+  assert.deepEqual(result.calls, { loopback: 1, usage: 0 });
+});
+
+test("a failing /usage keeps the cache and backs off from 60 s, doubling to a 10-minute cap", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  const before = fs.readFileSync(fixture.writePath, "utf8");
+  writeAuthRejected(fixture, "1.2.11");
+  const retryIn = () => Date.parse(String(readMarker(fixture).usageRetryAt)) - Date.now();
+
+  assert.equal((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected, usageFail)).code, 2);
+  assert.equal(fs.readFileSync(fixture.writePath, "utf8"), before);
+  assert.equal(readMarker(fixture).usageFailures, 1);
+  assert.ok(Math.abs(retryIn() - 60_000) < 5_000, String(retryIn()));
+
+  await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected, usageFail);
+  assert.equal(readMarker(fixture).usageFailures, 2);
+  assert.ok(Math.abs(retryIn() - 120_000) < 5_000, String(retryIn()));
+
+  fs.writeFileSync(authRejectedPath(fixture), JSON.stringify({ ...readMarker(fixture), usageFailures: 6 }));
+  await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected, usageFail);
+  assert.ok(Math.abs(retryIn() - 600_000) < 5_000, String(retryIn()));
+
+  assert.equal((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected, usageOk)).code, 0);
+  const marker = readMarker(fixture);
+  assert.equal(marker.cliVersion, "1.2.11");
+  assert.equal(marker.usageFailures, undefined);
+  assert.equal(marker.usageRetryAt, undefined);
+});
+
+// agy renders the status line in print mode too, so the /usage child renders agy-hud. That nested
+// render must never start a refresh or disturb the interactive session's state.
+test("a nested status line renders without refreshing or writing state", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 24 * 60 * 60 * 1000);
+  writeRefreshState(fixture.writePath, "working");
+  const stateBefore = fs.readFileSync(`${fixture.writePath}.statusline.json`, "utf8");
+  process.env.AGY_HUD_NESTED = "1";
   let calls = 0;
-  await runInHome(fixture, () => runCli(["quota", "refresh", "--cli-version", "1.2.11"], {
-    stdout: () => {}, stderr: () => {},
-    refreshQuota: async () => { calls += 1; return { ok: false, message: "rejected", authRejected: true }; }
-  }));
-  assert.equal(calls, 1);
+  let out = "";
+  try {
+    await runInHome(fixture, () => runCli(["statusline"], {
+      stdin: Readable.from([versionedPayload("1.2.11")]),
+      stdout: chunk => { out += chunk; }, stderr: () => {},
+      refreshQuota: async () => { calls += 1; return { ok: true, message: "refreshed" }; }
+    }));
+  } finally {
+    delete process.env.AGY_HUD_NESTED;
+  }
+  assert.equal(calls, 0);
+  assert.match(strip(out), /Idle/);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(fs.existsSync(fixture.markerPath), false, "no background refresh");
+  assert.equal(fs.readFileSync(`${fixture.writePath}.statusline.json`, "utf8"), stateBefore);
+});
+
+async function usageModeSpawns(prevState: string, agentState: string, cacheAgeMs: number, setup: (fixture: HomeFixture) => void = () => {}): Promise<boolean> {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, cacheAgeMs);
+  writeRefreshState(fixture.writePath, prevState);
+  writeAuthRejected(fixture, "1.2.11");
+  setup(fixture);
+  await runStatuslineInHome(fixture, versionedPayload("1.2.11", agentState));
+  await new Promise(resolve => setTimeout(resolve, 250));
+  return fs.existsSync(fixture.markerPath);
+}
+
+test("/usage refreshes follow the 60-second active and 5-minute idle floors", async () => {
+  assert.equal(await usageModeSpawns("working", "working", 90_000), true, "working, cache 90 s old");
+  assert.equal(await usageModeSpawns("working", "working", 30_000), false, "working, cache 30 s old");
+  assert.equal(await usageModeSpawns("working", "idle", 90_000), true, "turn settled, cache 90 s old");
+  assert.equal(await usageModeSpawns("working", "idle", 30_000), false, "turn settled, cache 30 s old");
+  assert.equal(await usageModeSpawns("idle", "idle", 3 * 60_000), false, "idle, cache 3 min old");
+  assert.equal(await usageModeSpawns("idle", "idle", 6 * 60_000), true, "idle, cache 6 min old");
+});
+
+test("/usage refreshes wait out the backoff", async () => {
+  const future = new Date(Date.now() + 5 * 60_000).toISOString();
+  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, fixture => {
+    fs.writeFileSync(authRejectedPath(fixture), JSON.stringify({ cliVersion: "1.2.11", usageFailures: 2, usageRetryAt: future }));
+  }), false);
+});
+
+test("/usage refreshes respect a live lock and take over a stale one", async () => {
+  const lock = (ageMs: number) => (fixture: HomeFixture) => {
+    const lockPath = `${fixture.writePath}.lock`;
+    fs.writeFileSync(lockPath, new Date().toISOString());
+    const when = new Date(Date.now() - ageMs);
+    fs.utimesSync(lockPath, when, when);
+  };
+  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, lock(20_000)), false, "a 20 s old lock is live");
+  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, lock(2 * 60_000)), true, "a 2 min old lock is stale");
 });

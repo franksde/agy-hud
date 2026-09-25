@@ -348,7 +348,12 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
     if (!Number.isFinite(bucket?.remaining_fraction) || !Number.isFinite(reset) || reset <= now.getTime()) {
       continue;
     }
-    live[key] = { remaining_fraction: bucket.remaining_fraction, reset_time: bucket.reset_time };
+    // A countdown from now, so a cached window reads like one straight from the payload.
+    live[key] = {
+      remaining_fraction: bucket.remaining_fraction,
+      reset_time: bucket.reset_time,
+      reset_in_seconds: Math.trunc((reset - now.getTime()) / 1000)
+    };
   }
   return Object.keys(live).length > 0 ? live : null;
 }

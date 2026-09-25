@@ -162,10 +162,10 @@ __export(main_exports, {
   version: () => version
 });
 module.exports = __toCommonJS(main_exports);
-var import_node_fs5 = __toESM(require("node:fs"));
-var import_node_os = __toESM(require("node:os"));
-var import_node_path4 = __toESM(require("node:path"));
-var import_node_child_process2 = require("node:child_process");
+var import_node_fs6 = __toESM(require("node:fs"));
+var import_node_os2 = __toESM(require("node:os"));
+var import_node_path5 = __toESM(require("node:path"));
+var import_node_child_process3 = require("node:child_process");
 
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
@@ -564,16 +564,121 @@ function asRecord(value) {
   return isRecord(value) ? value : {};
 }
 
-// src/gitinfo.ts
+// src/usageCommand.ts
 var import_node_fs4 = __toESM(require("node:fs"));
+var import_node_os = __toESM(require("node:os"));
 var import_node_path2 = __toESM(require("node:path"));
+var import_node_child_process2 = require("node:child_process");
+var usageArgs = ["-p", "/usage", "--output-format", "json", "--print-timeout", "30s"];
+async function queryUsage(runner = runAgy) {
+  const result = await runner(usageArgs, { ...process.env, AGY_HUD_NESTED: "1" });
+  if (result.error !== void 0) {
+    return { ok: false, message: "agy /usage failed: could not start agy." };
+  }
+  if (result.timedOut) {
+    return { ok: false, message: "agy /usage failed: timed out." };
+  }
+  if (result.code !== 0) {
+    return { ok: false, message: `agy /usage failed: exit ${result.code ?? "signal"}.` };
+  }
+  const quota = parseUsageOutput(result.stdout);
+  if (quota === null) {
+    return { ok: false, message: "agy /usage failed: unreadable output." };
+  }
+  return { ok: true, quota };
+}
+function parseUsageOutput(stdout) {
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const groups = record(record(record(parsed).command).data).groups;
+  if (!Array.isArray(groups)) {
+    return null;
+  }
+  const quota = {};
+  for (const group of groups) {
+    const buckets = record(group).buckets;
+    if (!Array.isArray(buckets)) continue;
+    for (const raw of buckets) {
+      const bucket = record(raw);
+      const id = bucket.id;
+      const fraction = bucket.remaining_fraction;
+      const reset = bucket.reset_time;
+      if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) continue;
+      if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) continue;
+      if (typeof reset !== "string" || !Number.isFinite(Date.parse(reset))) continue;
+      quota[id] = { remaining_fraction: fraction, reset_time: reset };
+    }
+  }
+  return Object.keys(quota).length > 0 ? quota : null;
+}
+function runAgy(args, env, options = {}) {
+  const { command = "agy", timeoutMs = 45 * 1e3, maxBytes = 1024 * 1024 } = options;
+  return new Promise((resolve) => {
+    let scratch;
+    try {
+      scratch = import_node_fs4.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "agy-hud-usage-"));
+    } catch (error) {
+      resolve({ code: null, stdout: "", timedOut: false, error: String(error) });
+      return;
+    }
+    const chunks = [];
+    let size = 0;
+    let timedOut = false;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        import_node_fs4.default.rmSync(scratch, { recursive: true, force: true });
+      } catch {
+      }
+      resolve(result);
+    };
+    const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached: true });
+    const killGroup = () => {
+      try {
+        if (child.pid !== void 0) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      if (size + chunk.length > maxBytes) {
+        chunks.push(chunk.subarray(0, maxBytes - size));
+        size = maxBytes;
+        killGroup();
+        return;
+      }
+      chunks.push(chunk);
+      size += chunk.length;
+    });
+    child.on("error", (error) => finish({ code: null, stdout: "", timedOut: false, error: String(error) }));
+    child.on("close", (code) => finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut }));
+  });
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+// src/gitinfo.ts
+var import_node_fs5 = __toESM(require("node:fs"));
+var import_node_path3 = __toESM(require("node:path"));
 function branch(cwd) {
   if (cwd === "") {
     return "";
   }
   let dir;
   try {
-    dir = import_node_path2.default.resolve(cwd);
+    dir = import_node_path3.default.resolve(cwd);
   } catch {
     dir = cwd;
   }
@@ -582,7 +687,7 @@ function branch(cwd) {
     if (raw !== null) {
       return parseHEAD(raw.trim());
     }
-    const parent = import_node_path2.default.dirname(dir);
+    const parent = import_node_path3.default.dirname(dir);
     if (parent === dir) {
       break;
     }
@@ -591,23 +696,23 @@ function branch(cwd) {
   return "";
 }
 function readHEAD(dir) {
-  const gitPath = import_node_path2.default.join(dir, ".git");
+  const gitPath = import_node_path3.default.join(dir, ".git");
   let stat;
   try {
-    stat = import_node_fs4.default.statSync(gitPath);
+    stat = import_node_fs5.default.statSync(gitPath);
   } catch {
     return null;
   }
   if (stat.isDirectory()) {
     try {
-      return import_node_fs4.default.readFileSync(import_node_path2.default.join(gitPath, "HEAD"), "utf8");
+      return import_node_fs5.default.readFileSync(import_node_path3.default.join(gitPath, "HEAD"), "utf8");
     } catch {
       return null;
     }
   }
   let raw;
   try {
-    raw = import_node_fs4.default.readFileSync(gitPath, "utf8");
+    raw = import_node_fs5.default.readFileSync(gitPath, "utf8");
   } catch {
     return null;
   }
@@ -615,11 +720,11 @@ function readHEAD(dir) {
   if (gitDir === "") {
     return null;
   }
-  if (!import_node_path2.default.isAbsolute(gitDir)) {
-    gitDir = import_node_path2.default.join(dir, gitDir);
+  if (!import_node_path3.default.isAbsolute(gitDir)) {
+    gitDir = import_node_path3.default.join(dir, gitDir);
   }
   try {
-    return import_node_fs4.default.readFileSync(import_node_path2.default.join(gitDir, "HEAD"), "utf8");
+    return import_node_fs5.default.readFileSync(import_node_path3.default.join(gitDir, "HEAD"), "utf8");
   } catch {
     return null;
   }
@@ -636,7 +741,7 @@ function parseHEAD(head) {
     if (ref.startsWith("refs/heads/")) {
       return ref.slice("refs/heads/".length);
     }
-    return import_node_path2.default.basename(ref);
+    return import_node_path3.default.basename(ref);
   }
   if (head.length > 7) {
     return head.slice(0, 7);
@@ -670,7 +775,7 @@ function truncateColumns(input, width) {
 }
 
 // src/statusline.ts
-var import_node_path3 = __toESM(require("node:path"));
+var import_node_path4 = __toESM(require("node:path"));
 var colorReset = "\x1B[0m";
 var colorBlue = "\x1B[34m";
 var colorGreen = "\x1B[32m";
@@ -734,7 +839,7 @@ function render(payload, opts) {
 function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, branch2, stateLabel) {
   const line1Parts = [colorize(modelSegment, colorBlue, config.color)];
   if (config.showCWD && payload.cwd) {
-    line1Parts.push(colorize(withIcon(config, "\uF07C ", "") + import_node_path3.default.basename(payload.cwd), colorYellow, config.color));
+    line1Parts.push(colorize(withIcon(config, "\uF07C ", "") + import_node_path4.default.basename(payload.cwd), colorYellow, config.color));
   }
   if (config.showGitBranch && branch2 !== "") {
     line1Parts.push(colorize(renderGitSegment(branch2, config), colorMagenta, config.color));
@@ -926,7 +1031,11 @@ function liveCachedBuckets(cache, now) {
     if (!Number.isFinite(bucket?.remaining_fraction) || !Number.isFinite(reset) || reset <= now.getTime()) {
       continue;
     }
-    live[key] = { remaining_fraction: bucket.remaining_fraction, reset_time: bucket.reset_time };
+    live[key] = {
+      remaining_fraction: bucket.remaining_fraction,
+      reset_time: bucket.reset_time,
+      reset_in_seconds: Math.trunc((reset - now.getTime()) / 1e3)
+    };
   }
   return Object.keys(live).length > 0 ? live : null;
 }
@@ -1506,26 +1615,26 @@ function configPaths() {
   paths.push(...pluginConfigPaths());
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
-    paths.push(import_node_path4.default.join(xdg, "agy-hud", "config.json"));
+    paths.push(import_node_path5.default.join(xdg, "agy-hud", "config.json"));
   }
-  const home = import_node_os.default.homedir();
+  const home = import_node_os2.default.homedir();
   if (home) {
-    paths.push(import_node_path4.default.join(home, ".config", "agy-hud", "config.json"));
+    paths.push(import_node_path5.default.join(home, ".config", "agy-hud", "config.json"));
   }
   return paths;
 }
 function pluginConfigPaths() {
-  const dir = import_node_path4.default.dirname(__filename);
-  return [import_node_path4.default.join(dir, "config.json"), import_node_path4.default.join(dir, "..", "config.json")];
+  const dir = import_node_path5.default.dirname(__filename);
+  return [import_node_path5.default.join(dir, "config.json"), import_node_path5.default.join(dir, "..", "config.json")];
 }
 function userConfigPath() {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
-    return import_node_path4.default.join(xdg, "agy-hud", "config.json");
+    return import_node_path5.default.join(xdg, "agy-hud", "config.json");
   }
-  const home = import_node_os.default.homedir();
+  const home = import_node_os2.default.homedir();
   if (home) {
-    return import_node_path4.default.join(home, ".config", "agy-hud", "config.json");
+    return import_node_path5.default.join(home, ".config", "agy-hud", "config.json");
   }
   return "";
 }
@@ -1535,21 +1644,21 @@ function quotaCacheWritePath() {
     return explicit;
   }
   const xdg = process.env.XDG_CACHE_HOME;
-  if (xdg && import_node_path4.default.isAbsolute(xdg)) {
-    return import_node_path4.default.join(xdg, "agy-hud", "quota_cache.json");
+  if (xdg && import_node_path5.default.isAbsolute(xdg)) {
+    return import_node_path5.default.join(xdg, "agy-hud", "quota_cache.json");
   }
-  const home = import_node_os.default.homedir();
+  const home = import_node_os2.default.homedir();
   if (!home) {
     return "";
   }
-  return import_node_path4.default.join(home, ".cache", "agy-hud", "quota_cache.json");
+  return import_node_path5.default.join(home, ".cache", "agy-hud", "quota_cache.json");
 }
 function legacyQuotaCachePath() {
-  const home = import_node_os.default.homedir();
+  const home = import_node_os2.default.homedir();
   if (!home) {
     return "";
   }
-  return import_node_path4.default.join(home, ".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
+  return import_node_path5.default.join(home, ".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
 }
 function quotaCacheReadCandidates() {
   if (process.env.AGY_HUD_QUOTA_CACHE) {
@@ -1566,7 +1675,7 @@ function loadQuotaFromCandidates(candidates) {
     if (ok) {
       return [cache, true, primaryUnloadable];
     }
-    if (index === 0 && import_node_fs5.default.existsSync(candidate)) {
+    if (index === 0 && import_node_fs6.default.existsSync(candidate)) {
       primaryUnloadable = true;
     }
   }
@@ -1594,7 +1703,7 @@ function shouldUseProcessCWD(payloadCWD) {
   if (payloadCWD.trim() === "") {
     return true;
   }
-  return import_node_path4.default.basename(process.cwd()) === import_node_path4.default.basename(payloadCWD);
+  return import_node_path5.default.basename(process.cwd()) === import_node_path5.default.basename(payloadCWD);
 }
 function validGitCandidatePath(candidate) {
   const trimmed = candidate.trim();
@@ -1602,7 +1711,7 @@ function validGitCandidatePath(candidate) {
     return false;
   }
   try {
-    return import_node_fs5.default.statSync(trimmed).isDirectory();
+    return import_node_fs6.default.statSync(trimmed).isDirectory();
   } catch {
     return false;
   }
@@ -1625,7 +1734,7 @@ function usage(write) {
 }
 function fcList() {
   try {
-    return (0, import_node_child_process2.execFileSync)("fc-list", [":", "family"], {
+    return (0, import_node_child_process3.execFileSync)("fc-list", [":", "family"], {
       encoding: "utf8",
       timeout: 3e3,
       maxBuffer: 8 * 1024 * 1024,
@@ -1641,20 +1750,20 @@ function doctorDepsFromEnv() {
     nodeVersion: process.version,
     platform: process.platform,
     env: process.env,
-    homedir: import_node_os.default.homedir(),
+    homedir: import_node_os2.default.homedir(),
     configPaths: configPaths(),
     userConfigPath: userConfigPath(),
     pluginConfigPaths: pluginConfigPaths(),
     readFile: (filePath) => {
       try {
-        return import_node_fs5.default.readFileSync(filePath, "utf8");
+        return import_node_fs6.default.readFileSync(filePath, "utf8");
       } catch {
         return null;
       }
     },
     listDir: (dirPath) => {
       try {
-        return import_node_fs5.default.readdirSync(dirPath);
+        return import_node_fs6.default.readdirSync(dirPath);
       } catch {
         return [];
       }
@@ -1681,6 +1790,11 @@ async function runCli(args, deps = {}) {
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
+    if (process.env.AGY_HUD_NESTED === "1") {
+      stdout(`${renderStatusline(raw, cfg, ok ? cache : null)}
+`);
+      return 0;
+    }
     const cliVersion = safeCliVersion(payload?.version);
     const probeRejected = authRejectedFor(cachePath, cliVersion);
     const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(
@@ -1702,8 +1816,16 @@ async function runCli(args, deps = {}) {
       const lockPath = cachePath + ".lock";
       const cliVersion = args[2] === "--cli-version" ? safeCliVersion(args[3]) : "";
       try {
-        const result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
-        recordAuthRejection(cachePath, result, cliVersion);
+        let result = null;
+        if (!authRejectedFor(cachePath, cliVersion)) {
+          result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
+          recordAuthRejection(cachePath, result, cliVersion);
+        }
+        if (result === null || !result.ok && result.authRejected) {
+          const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
+          recordUsageOutcome(cachePath, cliVersion, outcome.ok);
+          result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+        }
         stderr(`[quota_probe] ${result.message}
 `);
         if (result.ok && result.summary) {
@@ -1717,8 +1839,8 @@ async function runCli(args, deps = {}) {
         return 2;
       } finally {
         try {
-          if (import_node_fs5.default.existsSync(lockPath)) {
-            import_node_fs5.default.unlinkSync(lockPath);
+          if (import_node_fs6.default.existsSync(lockPath)) {
+            import_node_fs6.default.unlinkSync(lockPath);
           }
         } catch {
         }
@@ -1806,28 +1928,93 @@ function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repa
   const activityRefresh = shouldTriggerActivityRefresh(cache, payload, prevState, now);
   const nextState = mergeStatuslineRefreshState(prevState, payload, activityRefresh, now);
   saveStatuslineRefreshState(statePath, nextState);
-  if (probeRejected || !quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh) {
+  const lockPath = cachePath + ".lock";
+  if (probeRejected) {
+    if (usageRefreshDue(cache, payload, prevState, readRejectionMarker(cachePath), now) && takeUsageLock(lockPath, now)) {
+      spawnQuotaRefresh(cliVersion);
+    }
     return;
   }
-  const lockPath = cachePath + ".lock";
+  if (!quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh) {
+    return;
+  }
   try {
-    if (import_node_fs5.default.existsSync(lockPath)) {
-      const stat = import_node_fs5.default.statSync(lockPath);
+    if (import_node_fs6.default.existsSync(lockPath)) {
+      const stat = import_node_fs6.default.statSync(lockPath);
       const minLockMs = activityRefresh ? 5 * 1e3 : 30 * 1e3;
       if (now.getTime() - stat.mtimeMs < minLockMs) {
         return;
       }
     }
-    import_node_fs5.default.writeFileSync(lockPath, (/* @__PURE__ */ new Date()).toISOString(), "utf8");
-    const nodePath = process.argv[0];
+    import_node_fs6.default.writeFileSync(lockPath, (/* @__PURE__ */ new Date()).toISOString(), "utf8");
+    spawnQuotaRefresh(cliVersion);
+  } catch {
+  }
+}
+function spawnQuotaRefresh(cliVersion) {
+  try {
     const args = [__filename, "quota", "refresh", ...cliVersion ? ["--cli-version", cliVersion] : []];
-    const child = (0, import_node_child_process2.spawn)(nodePath, args, {
+    const child = (0, import_node_child_process3.spawn)(process.argv[0], args, {
       detached: true,
       stdio: "ignore"
     });
     child.unref();
   } catch {
   }
+}
+var usageActiveFloorMs = 60 * 1e3;
+var usageIdleFloorMs = 5 * 60 * 1e3;
+var usageLockStaleMs = 60 * 1e3;
+function usageRefreshDue(cache, payload, prevState, marker, now) {
+  const retryAt = Date.parse(marker?.usageRetryAt ?? "");
+  if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
+    return false;
+  }
+  const agentState = normalizeAgentState(payload?.agent_state);
+  const prevAgentState = prevState?.agentState ?? "";
+  const active = agentState !== "idle" || prevAgentState !== "" && prevAgentState !== "idle";
+  const cacheTime = Date.parse(cache?.timestamp ?? "");
+  const age = Number.isFinite(cacheTime) ? now.getTime() - cacheTime : Infinity;
+  return age > (active ? usageActiveFloorMs : usageIdleFloorMs);
+}
+function takeUsageLock(lockPath, now) {
+  try {
+    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(lockPath), { recursive: true, mode: 448 });
+  } catch {
+    return false;
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      import_node_fs6.default.writeFileSync(lockPath, now.toISOString(), { encoding: "utf8", flag: "wx", mode: 384 });
+      return true;
+    } catch (error) {
+      if (error.code !== "EEXIST") {
+        return false;
+      }
+      try {
+        if (now.getTime() - import_node_fs6.default.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
+          return false;
+        }
+        import_node_fs6.default.rmSync(lockPath, { force: true });
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+function saveUsageCache(cachePath, quota) {
+  try {
+    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(cachePath), { recursive: true, mode: 448 });
+    const cache = { timestamp: (/* @__PURE__ */ new Date()).toISOString(), source: "usage", models: {}, quota };
+    import_node_fs6.default.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}
+`, { encoding: "utf8", mode: 384 });
+    import_node_fs6.default.chmodSync(cachePath, 384);
+  } catch (error) {
+    return { ok: false, message: `Could not write the quota cache: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const summary = Object.entries(quota).map(([key, bucket]) => `${key} ${Math.round((bucket.remaining_fraction ?? 0) * 100)}% left`).join(", ");
+  return { ok: true, message: `Cached quota from agy /usage to ${cachePath}`, cachePath, summary };
 }
 function quotaCacheNeedsRefresh(cache, now = /* @__PURE__ */ new Date()) {
   if (!cache || !cache.timestamp) {
@@ -1860,34 +2047,61 @@ function safeCliVersion(raw) {
 function authRejectedPath(cachePath) {
   return cachePath === "" ? "" : `${cachePath}.auth-rejected.json`;
 }
-function authRejectedFor(cachePath, cliVersion) {
-  const markerPath = authRejectedPath(cachePath);
-  if (markerPath === "" || cliVersion === "") {
-    return false;
-  }
-  try {
-    const marker = JSON.parse(import_node_fs5.default.readFileSync(markerPath, "utf8"));
-    return marker.cliVersion === cliVersion;
-  } catch {
-    return false;
-  }
-}
-function recordAuthRejection(cachePath, result, cliVersion) {
+function readRejectionMarker(cachePath) {
   const markerPath = authRejectedPath(cachePath);
   if (markerPath === "") {
+    return null;
+  }
+  try {
+    const marker = JSON.parse(import_node_fs6.default.readFileSync(markerPath, "utf8"));
+    if (typeof marker.cliVersion !== "string") {
+      return null;
+    }
+    return {
+      cliVersion: marker.cliVersion,
+      rejectedAt: typeof marker.rejectedAt === "string" ? marker.rejectedAt : "",
+      usageFailures: Number.isInteger(marker.usageFailures) && (marker.usageFailures ?? 0) > 0 ? marker.usageFailures : void 0,
+      usageRetryAt: typeof marker.usageRetryAt === "string" ? marker.usageRetryAt : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+function writeRejectionMarker(cachePath, marker) {
+  const markerPath = authRejectedPath(cachePath);
+  import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(markerPath), { recursive: true, mode: 448 });
+  import_node_fs6.default.writeFileSync(markerPath, `${JSON.stringify(marker)}
+`, { encoding: "utf8", mode: 384 });
+}
+function authRejectedFor(cachePath, cliVersion) {
+  return cliVersion !== "" && readRejectionMarker(cachePath)?.cliVersion === cliVersion;
+}
+function recordAuthRejection(cachePath, result, cliVersion) {
+  if (authRejectedPath(cachePath) === "") {
     return;
   }
   try {
     if (result.ok) {
-      import_node_fs5.default.rmSync(markerPath, { force: true });
-    } else if (result.authRejected && cliVersion !== "") {
-      import_node_fs5.default.mkdirSync(import_node_path4.default.dirname(markerPath), { recursive: true, mode: 448 });
-      import_node_fs5.default.writeFileSync(markerPath, `${JSON.stringify({ cliVersion, rejectedAt: (/* @__PURE__ */ new Date()).toISOString() })}
-`, {
-        encoding: "utf8",
-        mode: 384
-      });
+      import_node_fs6.default.rmSync(authRejectedPath(cachePath), { force: true });
+    } else if (result.authRejected && cliVersion !== "" && !authRejectedFor(cachePath, cliVersion)) {
+      writeRejectionMarker(cachePath, { cliVersion, rejectedAt: (/* @__PURE__ */ new Date()).toISOString() });
     }
+  } catch {
+  }
+}
+function recordUsageOutcome(cachePath, cliVersion, ok) {
+  const marker = readRejectionMarker(cachePath);
+  if (!marker || cliVersion === "" || marker.cliVersion !== cliVersion) {
+    return;
+  }
+  try {
+    if (ok) {
+      writeRejectionMarker(cachePath, { cliVersion: marker.cliVersion, rejectedAt: marker.rejectedAt });
+      return;
+    }
+    const failures = (marker.usageFailures ?? 0) + 1;
+    const delayMs = Math.min(60 * 1e3 * 2 ** (failures - 1), 10 * 60 * 1e3);
+    writeRejectionMarker(cachePath, { ...marker, usageFailures: failures, usageRetryAt: new Date(Date.now() + delayMs).toISOString() });
   } catch {
   }
 }
@@ -1903,7 +2117,7 @@ function loadRefreshStateWithFallback(candidates) {
     if (statePath === "") {
       continue;
     }
-    if (import_node_fs5.default.existsSync(statePath)) {
+    if (import_node_fs6.default.existsSync(statePath)) {
       return loadStatuslineRefreshState(statePath);
     }
   }
@@ -1914,7 +2128,7 @@ function loadStatuslineRefreshState(statePath) {
     return null;
   }
   try {
-    const raw = import_node_fs5.default.readFileSync(statePath, "utf8");
+    const raw = import_node_fs6.default.readFileSync(statePath, "utf8");
     const parsed = JSON.parse(raw);
     return {
       conversationId: typeof parsed.conversationId === "string" ? parsed.conversationId : "",
@@ -1930,8 +2144,8 @@ function saveStatuslineRefreshState(statePath, state2) {
     return;
   }
   try {
-    import_node_fs5.default.mkdirSync(import_node_path4.default.dirname(statePath), { recursive: true, mode: 448 });
-    import_node_fs5.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
+    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(statePath), { recursive: true, mode: 448 });
+    import_node_fs6.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
 `, { encoding: "utf8", mode: 384 });
   } catch {
   }
