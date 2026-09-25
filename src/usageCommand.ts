@@ -99,6 +99,8 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // Let go of the pipe, so a helper still holding it cannot keep this process alive.
+      child.stdout.destroy();
       try {
         fs.rmSync(scratch, { recursive: true, force: true });
       } catch {
@@ -136,6 +138,7 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
     // would hold "close" back until the timeout. Give the pipe a moment to drain, then end the run.
     child.on("exit", code => {
       setTimeout(() => {
+        if (settled) return;
         killGroup();
         finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut });
       }, 500).unref();

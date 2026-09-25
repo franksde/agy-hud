@@ -110,12 +110,13 @@ const titleColumns = 24;
 
 // The title is free text the user or the model chose, so it is reduced to one plain line: control
 // characters (newlines, ESC/OSC sequences, BEL) would otherwise break the HUD layout or reach the
-// terminal as commands. Format characters (bidi overrides, zero-width spaces and joiners) are dropped,
-// so an invisible title cannot take up columns or reorder the line.
+// terminal as commands. Format characters (bidi overrides, zero-width spaces) are dropped, so an
+// invisible title cannot take up columns or reorder the line. ZWNJ, ZWJ and tag characters stay: they
+// shape visible text (word breaks, ZWJ emoji, subdivision flags) and cost no columns of their own.
 function renderTitle(raw: unknown, config: Config): string {
   if (!config.showTitle || typeof raw !== "string") return "";
-  const text = raw.replace(/\p{Cc}/gu, " ").replace(/\p{Cf}/gu, "").trim().split(/\s+/).filter(Boolean).join(" ");
-  if (text === "") return "";
+  const text = raw.replace(/\p{Cc}/gu, " ").replace(/(?![\u200C\u200D\u{E0020}-\u{E007F}])\p{Cf}/gu, "").trim().split(/\s+/).filter(Boolean).join(" ");
+  if (visibleLen(text) === 0) return "";
   const clipped = visibleLen(text) > titleColumns ? `${truncateColumns(text, titleColumns - 1)}…` : text;
   return colorize(clipped, colorMuted, config.color);
 }
@@ -378,7 +379,9 @@ function mergeQuotaBuckets(
     }
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
     const payloadEnded = Number.isFinite(payloadReset) && payloadReset <= now.getTime();
-    if (payloadEnded || (fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
+    // On a tie the cached reading wins too: its countdown is computed from now, the payload's from
+    // whenever the CLI last fetched.
+    if (payloadEnded || (fromCache.remaining_fraction ?? 1) <= (fromPayload.remaining_fraction ?? 1)) {
       merged[key] = fromCache;
     }
   }

@@ -1301,6 +1301,7 @@ test("/usage refreshes follow the 60-second active and 5-minute idle floors", as
   assert.equal(await usageModeSpawns("working", "idle", 30_000), false, "turn settled, cache 30 s old");
   assert.equal(await usageModeSpawns("idle", "idle", 3 * 60_000), false, "idle, cache 3 min old");
   assert.equal(await usageModeSpawns("idle", "idle", 6 * 60_000), true, "idle, cache 6 min old");
+  assert.equal(await usageModeSpawns("idle", "", 90_000), false, "no agent state reads as idle, not active");
 });
 
 test("/usage refreshes wait out the backoff", async () => {

@@ -126,3 +126,21 @@ test("bucket ids may contain underscores", () => {
   const parsed = parseUsageOutput(usageJson([{ id: "3p_weekly", remaining_fraction: 0.5, reset_time: "2026-09-25T14:51:03Z" }]));
   assert.equal(parsed?.["3p_weekly"]?.remaining_fraction, 0.5);
 });
+
+test("runAgy sends no signal after a run has settled", async () => {
+  const { command } = fakeAgy("echo '{\"ok\":1}'");
+  const killed: Array<number | string> = [];
+  const originalKill = process.kill;
+  process.kill = ((pid: number, signal?: string | number) => {
+    killed.push(pid);
+    return originalKill.call(process, pid, signal as NodeJS.Signals);
+  }) as typeof process.kill;
+  try {
+    const result = await runAgy([], process.env, { command });
+    assert.equal(result.code, 0);
+    await new Promise(resolve => setTimeout(resolve, 800));
+  } finally {
+    process.kill = originalKill;
+  }
+  assert.deepEqual(killed, [], "a clean run must not be followed by a group kill");
+});

@@ -736,3 +736,24 @@ test("a title made only of invisible format characters is omitted", () => {
   };
   assert.equal(render(payload, { config, gitBranch: "main" }).split("\n")[0], "Sonnet 4.6 | Pro │ project │ main │ Idle");
 });
+
+test("titles keep joiners and tag characters that form visible glyphs", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  const payload: Payload = {
+    model: { display_name: "Claude Sonnet 4.6" }, cwd: "/workspace/project",
+    plan_tier: "Google AI Pro", agent_state: "idle", terminal_width: 120,
+    conversation_title: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Trip \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F} \u0645\u06CC\u200C\u062E"
+  };
+  const line = render(payload, { config, gitBranch: "main" }).split("\n")[0];
+  assert.ok(line.includes("\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Trip"), "a ZWJ family emoji stays one glyph");
+  assert.ok(line.includes("\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}"), "a tag-sequence flag stays intact");
+  assert.ok(line.includes("\u0645\u06CC\u200C\u062E"), "ZWNJ keeps its word shaping");
+});
+
+test("on equal remainders the cached reading wins, so the countdown is live", () => {
+  const line = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset, reset_in_seconds: 16151 + 1500 } },
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset } }
+  );
+  assert.match(line, /85% left ↻ Reset 4h 29m/);
+});

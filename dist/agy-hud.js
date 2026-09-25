@@ -634,6 +634,7 @@ function runAgy(args, env, options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      child.stdout.destroy();
       try {
         import_node_fs4.default.rmSync(scratch, { recursive: true, force: true });
       } catch {
@@ -666,6 +667,7 @@ function runAgy(args, env, options = {}) {
     child.on("close", (code) => finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut }));
     child.on("exit", (code) => {
       setTimeout(() => {
+        if (settled) return;
         killGroup();
         finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut });
       }, 500).unref();
@@ -820,8 +822,8 @@ function formatCost(usd) {
 var titleColumns = 24;
 function renderTitle(raw, config) {
   if (!config.showTitle || typeof raw !== "string") return "";
-  const text = raw.replace(new RegExp("\\p{Cc}", "gu"), " ").replace(new RegExp("\\p{Cf}", "gu"), "").trim().split(/\s+/).filter(Boolean).join(" ");
-  if (text === "") return "";
+  const text = raw.replace(new RegExp("\\p{Cc}", "gu"), " ").replace(new RegExp("(?![\\u200C\\u200D\\u{E0020}-\\u{E007F}])\\p{Cf}", "gu"), "").trim().split(/\s+/).filter(Boolean).join(" ");
+  if (visibleLen(text) === 0) return "";
   const clipped = visibleLen(text) > titleColumns ? `${truncateColumns(text, titleColumns - 1)}\u2026` : text;
   return colorize(clipped, colorMuted, config.color);
 }
@@ -1056,7 +1058,7 @@ function mergeQuotaBuckets(official, cached, now) {
     }
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
     const payloadEnded = Number.isFinite(payloadReset) && payloadReset <= now.getTime();
-    if (payloadEnded || (fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
+    if (payloadEnded || (fromCache.remaining_fraction ?? 1) <= (fromPayload.remaining_fraction ?? 1)) {
       merged[key] = fromCache;
     }
   }
