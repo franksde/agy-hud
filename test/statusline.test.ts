@@ -635,3 +635,78 @@ test("single-line shows the conversation title before state and drops it first",
   assert.equal(render(payload, { config }), "Sonnet 4.6 | Pro  Ctx 12%  █░░░░░░░░░  Fix login  Idle");
   assert.equal(render({ ...payload, terminal_width: 45 }, { config }), "Sonnet 4.6 | Pro  Ctx 12%  █░░░░░░░░░  Idle");
 });
+
+// A `/usage` cache carries the payload's bucket shape. Each window takes the fresher of the two
+// readings: a later reset_time is a newer window, and within one window the lower remainder is newer.
+function bucketRender(payloadQuota: Payload["quota"], cacheQuota: Cache["quota"], now = "2026-06-15T03:52:00Z"): string {
+  const payload = fixturePayload();
+  payload.terminal_width = 160;
+  payload.quota = payloadQuota;
+  const config = defaultConfig();
+  config.color = false;
+  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {}, quota: cacheQuota };
+  return strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date(now) })).split("\n")[1];
+}
+
+const fiveHourReset = "2026-06-15T08:21:23Z";
+const weeklyReset = "2026-06-19T01:21:19Z";
+
+test("a usage cache with less left in the same window wins, for the weekly window too", () => {
+  const line = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.84, reset_time: fiveHourReset, reset_in_seconds: 16151 },
+      "gemini-weekly": { remaining_fraction: 0.91, reset_time: weeklyReset, reset_in_seconds: 336547 } },
+    { "gemini-5h": { remaining_fraction: 0.8, reset_time: fiveHourReset },
+      "gemini-weekly": { remaining_fraction: 0.88, reset_time: weeklyReset } }
+  );
+  assert.match(line, /Usage \S+ 80% .*\| .*88%/);
+});
+
+test("the payload wins a window where it already shows less left", () => {
+  const line = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.7, reset_time: fiveHourReset, reset_in_seconds: 16151 },
+      "gemini-weekly": { remaining_fraction: 0.85, reset_time: weeklyReset, reset_in_seconds: 336547 } },
+    { "gemini-5h": { remaining_fraction: 0.8, reset_time: fiveHourReset },
+      "gemini-weekly": { remaining_fraction: 0.88, reset_time: weeklyReset } }
+  );
+  assert.match(line, /Usage \S+ 70% \(↻ 4h 29m\) \| .*85% \(↻ 3d 21h\)/);
+});
+
+test("a later reset_time is a newer window and wins even with more left", () => {
+  const line = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.3, reset_time: "2026-06-15T03:00:00Z" },
+      "gemini-weekly": { remaining_fraction: 0.85, reset_time: weeklyReset } },
+    { "gemini-5h": { remaining_fraction: 0.95, reset_time: fiveHourReset },
+      "gemini-weekly": { remaining_fraction: 0.85, reset_time: weeklyReset } },
+    "2026-06-15T02:59:00Z"
+  );
+  assert.match(line, /Usage \S+ 95% /);
+});
+
+test("a cached bucket whose window has already reset is ignored", () => {
+  const line = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.84, reset_time: fiveHourReset, reset_in_seconds: 16151 } },
+    { "gemini-5h": { remaining_fraction: 0.1, reset_time: "2026-06-15T03:00:00Z" } }
+  );
+  assert.match(line, /84%/);
+  assert.doesNotMatch(line, /10%/);
+});
+
+test("a usage cache renders both windows when the payload has no quota", () => {
+  const line = bucketRender(undefined, {
+    "gemini-5h": { remaining_fraction: 0.6, reset_time: fiveHourReset },
+    "gemini-weekly": { remaining_fraction: 0.75, reset_time: weeklyReset }
+  });
+  assert.match(line, /Usage \S+ 60% .*\| .*75%/);
+});
+
+test("third-party models read the third-party buckets of a usage cache", () => {
+  const payload = fixturePayload();
+  payload.model = { display_name: "Claude Sonnet 4.6 (Thinking)" };
+  payload.quota = { "3p-5h": { remaining_fraction: 0.9, reset_time: fiveHourReset } };
+  const config = defaultConfig();
+  config.color = false;
+  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {},
+    quota: { "3p-5h": { remaining_fraction: 0.5, reset_time: fiveHourReset }, "gemini-5h": { remaining_fraction: 0.2, reset_time: fiveHourReset } } };
+  const out = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") }));
+  assert.match(out, /50% left/);
+});

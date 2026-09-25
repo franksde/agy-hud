@@ -10,6 +10,14 @@ export interface Cache {
   email?: string;
   plan_name?: string;
   models: Record<string, ModelQuota>;
+  // Written by the `/usage` refresh: the status-line payload's bucket shape, keyed like "gemini-5h".
+  source?: string;
+  quota?: Record<string, CachedQuotaBucket>;
+}
+
+export interface CachedQuotaBucket {
+  remaining_fraction?: number;
+  reset_time?: string;
 }
 
 export function load(cachePath: string): [Cache | null, boolean] {

@@ -887,6 +887,13 @@ function withIcon(config, icon, fallback) {
   return config.showIcons ? icon : fallback;
 }
 function quotaInfo(cache, modelDisplay, officialQuota, now) {
+  const cachedBuckets = liveCachedBuckets(cache, now);
+  if (cachedBuckets !== null) {
+    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets), modelDisplay);
+    if (merged !== null) {
+      return merged;
+    }
+  }
   const cacheInfo = cacheQuotaInfo(cache, modelDisplay);
   const official = officialQuotaInfo(officialQuota, modelDisplay);
   if (official !== null) {
@@ -908,6 +915,38 @@ function cacheQuotaInfo(cache, modelDisplay) {
   const usagePct = usagePercent(quota);
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
   return quotaDisplay([{ label: "", usagePct, reset }]);
+}
+function liveCachedBuckets(cache, now) {
+  if (!cache?.quota || typeof cache.quota !== "object") {
+    return null;
+  }
+  const live = {};
+  for (const [key, bucket] of Object.entries(cache.quota)) {
+    const reset = Date.parse(bucket?.reset_time ?? "");
+    if (!Number.isFinite(bucket?.remaining_fraction) || !Number.isFinite(reset) || reset <= now.getTime()) {
+      continue;
+    }
+    live[key] = { remaining_fraction: bucket.remaining_fraction, reset_time: bucket.reset_time };
+  }
+  return Object.keys(live).length > 0 ? live : null;
+}
+function mergeQuotaBuckets(official, cached) {
+  const merged = { ...official };
+  for (const [key, fromCache] of Object.entries(cached)) {
+    const fromPayload = Object.prototype.hasOwnProperty.call(official, key) ? official[key] : void 0;
+    if (!fromPayload || !Number.isFinite(fromPayload.remaining_fraction)) {
+      merged[key] = fromCache;
+      continue;
+    }
+    const payloadReset = Date.parse(fromPayload.reset_time ?? "");
+    const cacheReset = Date.parse(fromCache.reset_time ?? "");
+    if (Number.isFinite(payloadReset) && Math.abs(cacheReset - payloadReset) > 60 * 1e3) {
+      merged[key] = cacheReset > payloadReset ? fromCache : fromPayload;
+    } else if ((fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
+      merged[key] = fromCache;
+    }
+  }
+  return merged;
 }
 function cacheIsFresh(cache, now) {
   if (!cache?.timestamp) {

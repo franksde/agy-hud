@@ -305,6 +305,13 @@ function withIcon(config: Config, icon: string, fallback: string): string {
 }
 
 function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, officialQuota: Record<string, OfficialQuotaBucket> | undefined, now: Date): QuotaDisplay {
+  const cachedBuckets = liveCachedBuckets(cache, now);
+  if (cachedBuckets !== null) {
+    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets), modelDisplay);
+    if (merged !== null) {
+      return merged;
+    }
+  }
   const cacheInfo = cacheQuotaInfo(cache, modelDisplay);
   const official = officialQuotaInfo(officialQuota, modelDisplay);
   if (official !== null) {
@@ -327,6 +334,48 @@ function cacheQuotaInfo(cache: Cache | null | undefined, modelDisplay: string): 
   const usagePct = quotaUsagePercent(quota);
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
   return quotaDisplay([{ label: "", usagePct, reset }]);
+}
+
+// The buckets a `/usage` refresh cached, minus any whose window has already reset: such a reading
+// describes a window that no longer exists.
+function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<string, OfficialQuotaBucket> | null {
+  if (!cache?.quota || typeof cache.quota !== "object") {
+    return null;
+  }
+  const live: Record<string, OfficialQuotaBucket> = {};
+  for (const [key, bucket] of Object.entries(cache.quota)) {
+    const reset = Date.parse(bucket?.reset_time ?? "");
+    if (!Number.isFinite(bucket?.remaining_fraction) || !Number.isFinite(reset) || reset <= now.getTime()) {
+      continue;
+    }
+    live[key] = { remaining_fraction: bucket.remaining_fraction, reset_time: bucket.reset_time };
+  }
+  return Object.keys(live).length > 0 ? live : null;
+}
+
+// The payload carries no fetch time, so freshness is read off the quota itself. A reset_time more than
+// a minute later belongs to a newer window. Within one window quota only goes down, so the lower
+// remainder is the more recent reading.
+function mergeQuotaBuckets(
+  official: Record<string, OfficialQuotaBucket>,
+  cached: Record<string, OfficialQuotaBucket>
+): Record<string, OfficialQuotaBucket> {
+  const merged: Record<string, OfficialQuotaBucket> = { ...official };
+  for (const [key, fromCache] of Object.entries(cached)) {
+    const fromPayload = Object.prototype.hasOwnProperty.call(official, key) ? official[key] : undefined;
+    if (!fromPayload || !Number.isFinite(fromPayload.remaining_fraction)) {
+      merged[key] = fromCache;
+      continue;
+    }
+    const payloadReset = Date.parse(fromPayload.reset_time ?? "");
+    const cacheReset = Date.parse(fromCache.reset_time ?? "");
+    if (Number.isFinite(payloadReset) && Math.abs(cacheReset - payloadReset) > 60 * 1000) {
+      merged[key] = cacheReset > payloadReset ? fromCache : fromPayload;
+    } else if ((fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
+      merged[key] = fromCache;
+    }
+  }
+  return merged;
 }
 
 function cacheIsFresh(cache: Cache | null | undefined, now: Date): boolean {
