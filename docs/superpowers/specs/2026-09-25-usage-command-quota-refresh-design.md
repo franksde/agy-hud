@@ -118,7 +118,9 @@ key the backoff on. A manual `quota refresh` is not paced.
 
 One refresh in flight across every session: a lock file next to the cache, taken with an exclusive
 create, holding a random owner token that the status line passes to the refresh it spawns. Only the
-refresh holding that token removes the lock; a manual refresh never does. A lock older than 120 s
+refresh holding that token removes the lock, and a background refresh runs `/usage` only while the
+lock still holds its token (review r2: on the first refusal of a version, the loopback path's
+non-exclusive lock let two children reach `/usage`). A manual refresh never touches the lock. A lock older than 120 s
 (a loopback probe followed by the 45 s `/usage` run) is stale: it is renamed aside under a unique
 name and the exclusive create is retried, so two status lines cannot both take it over.
 

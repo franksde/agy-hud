@@ -1831,7 +1831,7 @@ async function runCli(args, deps = {}) {
         }
         const usageNeeded = result === null || !result.ok && result.authRejected === true;
         if (usageNeeded && (!flags.background || cliVersion !== "")) {
-          const skip = flags.background ? usageSkipReason(cachePath, /* @__PURE__ */ new Date()) : null;
+          const skip = flags.background ? usageSkipReason(cachePath, lockPath, flags.lockToken, /* @__PURE__ */ new Date()) : null;
           if (skip !== null) {
             result = skip;
           } else {
@@ -2005,7 +2005,15 @@ function refreshFlags(args) {
   }
   return flags;
 }
-function usageSkipReason(cachePath, now) {
+function usageSkipReason(cachePath, lockPath, lockToken, now) {
+  let owner = "";
+  try {
+    owner = import_node_fs6.default.readFileSync(lockPath, "utf8");
+  } catch {
+  }
+  if (lockToken === "" || owner !== lockToken) {
+    return { ok: false, message: "Skipped agy /usage: another refresh holds the lock." };
+  }
   const retryAt = Date.parse(readRejectionMarker(cachePath)?.usageRetryAt ?? "");
   if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
     return { ok: false, message: "Skipped agy /usage: backing off after a failure." };

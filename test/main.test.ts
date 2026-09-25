@@ -1341,13 +1341,17 @@ test("a background refresh paces /usage itself: a fresh /usage cache or a pendin
   const fixture = homeFixture();
   writeAuthRejected(fixture, "1.2.11");
   writeUsageCache(fixture.writePath, 20_000);
-  const fresh = await runQuotaRefresh(fixture, ["--cli-version", "1.2.11", "--background"], rejected);
+  const holdLock = () => fs.writeFileSync(`${fixture.writePath}.lock`, "token-a");
+  const background = ["--cli-version", "1.2.11", "--background", "--lock-token", "token-a"];
+  holdLock();
+  const fresh = await runQuotaRefresh(fixture, background, rejected);
   assert.equal(fresh.code, 0);
   assert.deepEqual(fresh.calls, { loopback: 0, usage: 0 });
 
   writeUsageCache(fixture.writePath, 10 * 60_000);
   fs.writeFileSync(authRejectedPath(fixture), JSON.stringify({ cliVersion: "1.2.11", usageFailures: 1, usageRetryAt: new Date(Date.now() + 60_000).toISOString() }));
-  assert.deepEqual((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11", "--background"], rejected)).calls, { loopback: 0, usage: 0 });
+  holdLock();
+  assert.deepEqual((await runQuotaRefresh(fixture, background, rejected)).calls, { loopback: 0, usage: 0 });
 
   assert.deepEqual((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected)).calls, { loopback: 0, usage: 1 }, "a manual refresh is not paced");
 });
@@ -1387,4 +1391,22 @@ test("a /usage success whose cache write fails still backs off", async () => {
   const result = await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected, usageOk);
   assert.equal(result.code, 2);
   assert.equal(readMarker(fixture).usageFailures, 1);
+});
+
+// On the first refusal of a version, the loopback path's lock is not exclusive, so two background
+// children can both reach /usage. Only the one whose token is still in the lock may run it.
+test("a background refresh runs /usage only while it still owns the lock", async () => {
+  const fixture = homeFixture();
+  const lockPath = `${fixture.writePath}.lock`;
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  const args = ["--cli-version", "1.2.11", "--background", "--lock-token", "token-a"];
+
+  fs.writeFileSync(lockPath, "token-b");
+  const displaced = await runQuotaRefresh(fixture, args, rejected);
+  assert.deepEqual(displaced.calls, { loopback: 1, usage: 0 }, "a refresh whose lock was taken over must not run /usage");
+  assert.equal(fs.readFileSync(lockPath, "utf8"), "token-b", "and must leave the new owner's lock alone");
+
+  fs.writeFileSync(lockPath, "token-a");
+  assert.deepEqual((await runQuotaRefresh(fixture, args, rejected)).calls, { loopback: 0, usage: 1 });
+  assert.equal(fs.existsSync(lockPath), false);
 });

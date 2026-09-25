@@ -333,7 +333,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 | 一轮进行中,或刚结束 | 60 秒 |
 | CLI 空闲(例如打字引起的重绘) | 5 分钟 |
 
-所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,带这个标记的状态栏只渲染、不刷新。
+所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,带这个标记的状态栏只渲染、不刷新。
 
 被拒的情况记在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里,包括状态栏 payload 中的 CLI `version` 和失败退避。只要 payload 报的还是这个版本,刷新就直接走 `/usage`。CLI 升级后,下一次刷新会重新尝试 loopback,loopback 成功就删除这个文件。payload 里没有版本号时从不算被拒,手动执行 `quota refresh` 也总是先试 loopback。其他 loopback 失败(比如没有正在运行的服务)从不改走 `/usage`,所以旧版 CLI 的行为完全不变。
 

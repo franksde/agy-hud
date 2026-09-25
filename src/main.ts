@@ -331,7 +331,7 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
         // agy more often than the status line would. A manual refresh is never paced.
         const usageNeeded = result === null || (!result.ok && result.authRejected === true);
         if (usageNeeded && (!flags.background || cliVersion !== "")) {
-          const skip = flags.background ? usageSkipReason(cachePath, new Date()) : null;
+          const skip = flags.background ? usageSkipReason(cachePath, lockPath, flags.lockToken, new Date()) : null;
           if (skip !== null) {
             result = skip;
           } else {
@@ -543,8 +543,20 @@ function refreshFlags(args: string[]): RefreshFlags {
   return flags;
 }
 
-// The child's own pacing check: a pending backoff, or a /usage cache younger than the active floor.
-function usageSkipReason(cachePath: string, now: Date): RefreshResult | null {
+// The child's own check before it starts agy. It must still own the lock: on the first refusal of a
+// version the loopback path's lock is not exclusive, so two children can get here, and only the one
+// whose token is in the lock may run /usage. Then a pending backoff, or a /usage cache younger than
+// the active floor, also skips it.
+function usageSkipReason(cachePath: string, lockPath: string, lockToken: string, now: Date): RefreshResult | null {
+  let owner = "";
+  try {
+    owner = fs.readFileSync(lockPath, "utf8");
+  } catch {
+    // No lock at all: this refresh does not own one.
+  }
+  if (lockToken === "" || owner !== lockToken) {
+    return { ok: false, message: "Skipped agy /usage: another refresh holds the lock." };
+  }
   const retryAt = Date.parse(readRejectionMarker(cachePath)?.usageRetryAt ?? "");
   if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
     return { ok: false, message: "Skipped agy /usage: backing off after a failure." };
