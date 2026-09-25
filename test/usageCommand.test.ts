@@ -79,7 +79,7 @@ function fakeAgy(body: string): { command: string; dir: string } {
 }
 
 test("runAgy runs in a private scratch directory that it removes afterwards", async () => {
-  const { command, dir } = fakeAgy(`pwd > "${"$"}REPORT"; stat -f %Lp . >> "${"$"}REPORT" 2>/dev/null || stat -c %a . >> "${"$"}REPORT"; echo "${"$"}AGY_HUD_NESTED $*" >> "${"$"}REPORT"; echo '{"ok":1}'`);
+  const { command, dir } = fakeAgy(`pwd > "${"$"}REPORT"; { stat -c %a . 2>/dev/null || stat -f %Lp .; } >> "${"$"}REPORT"; echo "${"$"}AGY_HUD_NESTED $*" >> "${"$"}REPORT"; echo '{"ok":1}'`);
   const report = path.join(dir, "report.txt");
   const result = await runAgy(["-p", "/usage"], { ...process.env, AGY_HUD_NESTED: "1", REPORT: report }, { command });
   assert.equal(result.code, 0);
