@@ -64,3 +64,11 @@ test("load uses first existing path", () => {
 
   assert.equal(loadFromPaths([first, second]).showCWD, false);
 });
+
+test("show_title is off by default and honored from config JSON", () => {
+  assert.equal(defaultConfig().showTitle, false);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-"));
+  const configPath = path.join(dir, "config.json");
+  fs.writeFileSync(configPath, JSON.stringify({ show_title: true }));
+  assert.equal(loadFromPaths([configPath]).showTitle, true);
+});

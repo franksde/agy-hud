@@ -179,6 +179,7 @@ function defaultConfig() {
     showCWD: true,
     showAgentState: true,
     showCost: true,
+    showTitle: false,
     showIcons: true,
     contextValue: "percent",
     usageValue: "remaining",
@@ -213,6 +214,7 @@ function merge(base, patch) {
   if (typeof patch.show_cwd === "boolean") base.showCWD = patch.show_cwd;
   if (typeof patch.show_agent_state === "boolean") base.showAgentState = patch.show_agent_state;
   if (typeof patch.show_cost === "boolean") base.showCost = patch.show_cost;
+  if (typeof patch.show_title === "boolean") base.showTitle = patch.show_title;
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
@@ -686,6 +688,14 @@ function formatCost(usd) {
   }
   return "<$0.001";
 }
+var titleColumns = 24;
+function renderTitle(raw, config) {
+  if (!config.showTitle || typeof raw !== "string") return "";
+  const text = raw.replace(/[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, " ").trim().split(/\s+/).filter(Boolean).join(" ");
+  if (text === "") return "";
+  const clipped = visibleLen(text) > titleColumns ? `${truncateColumns(text, titleColumns - 1)}\u2026` : text;
+  return colorize(clipped, colorMuted, config.color);
+}
 function renderCost(cost, config) {
   const usd = cost?.total_usd;
   if (!config.showCost || typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) return "";
@@ -713,9 +723,13 @@ function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, br
     line1Parts.push(colorize(renderGitSegment(branch2, config), colorMagenta, config.color));
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
-  line1Parts.push(stateText);
+  const titleText = renderTitle(payload.conversation_title, config);
   const costText = renderCost(payload.cost, config);
-  let line1 = joinHeader(...line1Parts, costText);
+  let line1 = joinHeader(...line1Parts, titleText, stateText, costText);
+  line1Parts.push(stateText);
+  if (visibleLen(line1) > width) {
+    line1 = joinHeader(...line1Parts, costText);
+  }
   if (visibleLen(line1) > width) {
     line1 = joinHeader(...line1Parts);
   }
@@ -796,11 +810,13 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   const costText = renderCost(payload.cost, config);
+  const titleText = renderTitle(payload.conversation_title, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
+    [coloredBadge, ctx, tokens, bar, usage2, titleText, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText],
     [coloredBadge, ctx, bar, usage2, stateText],

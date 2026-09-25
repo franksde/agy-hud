@@ -273,6 +273,7 @@ node <插件根目录>/dist/agy-hud.js doctor --json
   "show_cwd": true,
   "show_agent_state": true,
   "show_cost": true,
+  "show_title": false,
   "show_icons": true,
   "context_value": "percent",
   "usage_value": "remaining"
@@ -286,6 +287,7 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 
 - `show_agent_state`:显示来自标准输入的 `agent_state`,例如 `Idle`、`Thinking` 或 `Auth`。
 - `show_cost`:显示 Antigravity CLI 1.1.21+ 提供的会话费用 `cost.total_usd`,位于首行末尾(单行模式则在该行末尾)。`estimated: true` 时加 `~`,例如 `~$0.02`。零显示为 `$0.00`,小于 $0.001 的正数显示为 `<$0.001`;缺失、负数或非有限数不显示。HUD 不额外累加 `subagent_usd`,也不自行计算订阅扣费;该值不是账单或实际收费承诺。
+- `show_title`:显示 Antigravity CLI 1.1.27+ 提供的会话标题 `conversation_title`,位于分支与 agent 状态之间(单行模式在状态之前)。默认关闭。标题会被整理成单行纯文本、去掉控制字符,最多占 24 列;一行放不下时它最先被省略,早于费用。
 - `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。跑 `doctor` 可以看到图标探针和确切的修复方式;完整说明见[图标显示成方块](#图标显示成方块)。
 - `context_value`:`percent`、`tokens` 或 `both`。默认为 `percent`,即上下文显示当前输入侧窗口占用率。存在 token 总量时,百分比和进度条会由 `total_input_tokens / context_window_size` 计算,避免最近一次长输出让 HUD 跳动。
 - `usage_value`:`remaining` 或 `percent`。默认为 `remaining`,即配额文字和进度条都显示剩余量。当 Antigravity 提供 5 小时和周两个窗口时,HUD 会按顺序分开显示各自的刷新倒计时,例如 `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`。

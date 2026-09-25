@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `show_title`, off by default, to show the `conversation_title` that Antigravity CLI 1.1.27+ passes to status-line scripts. The title is reduced to one plain line with control characters and bidi overrides removed, so it cannot break the layout or send sequences to the terminal, is clipped to 24 columns, and is the first segment dropped on a narrow terminal.
 - `doctor` warns when the config in effect lives inside the plugin directory. Antigravity CLI 1.1.28 made `agy plugin install` replace a plugin's directory exactly, so a `config.json` next to the bundle or in the plugin root is deleted by the next reinstall. The human report names the user-level path to move it to; `doctor --json` adds `configInPluginDir` and `userConfigPath`. Both READMEs recommend the user-level config path and warn about reinstalls.
 
 ## 0.1.10 — 2026-09-04

@@ -17,6 +17,7 @@ export interface Payload {
   cwd?: string;
   session_id?: string;
   conversation_id?: string;
+  conversation_title?: string;
   transcript_path?: string;
   email?: string;
   model?: {
@@ -104,6 +105,19 @@ export function formatCost(usd: number): string {
   return "<$0.001";
 }
 
+const titleColumns = 24;
+
+// The title is free text the user or the model chose, so it is reduced to one plain line: control
+// characters (newlines, ESC/OSC sequences, BEL) and bidi overrides would otherwise break the HUD
+// layout or reach the terminal as commands.
+function renderTitle(raw: unknown, config: Config): string {
+  if (!config.showTitle || typeof raw !== "string") return "";
+  const text = raw.replace(/[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, " ").trim().split(/\s+/).filter(Boolean).join(" ");
+  if (text === "") return "";
+  const clipped = visibleLen(text) > titleColumns ? `${truncateColumns(text, titleColumns - 1)}…` : text;
+  return colorize(clipped, colorMuted, config.color);
+}
+
 function renderCost(cost: Payload["cost"], config: Config): string {
   const usd = cost?.total_usd;
   if (!config.showCost || typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) return "";
@@ -133,9 +147,14 @@ function renderMultiline(payload: Payload, config: Config, width: number, modelS
     line1Parts.push(colorize(renderGitSegment(branch, config), colorMagenta, config.color));
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
-  line1Parts.push(stateText);
+  const titleText = renderTitle(payload.conversation_title, config);
   const costText = renderCost(payload.cost, config);
-  let line1 = joinHeader(...line1Parts, costText);
+  // The title is the first thing given up, then cost, then the rest in their existing order.
+  let line1 = joinHeader(...line1Parts, titleText, stateText, costText);
+  line1Parts.push(stateText);
+  if (visibleLen(line1) > width) {
+    line1 = joinHeader(...line1Parts, costText);
+  }
   if (visibleLen(line1) > width) {
     line1 = joinHeader(...line1Parts);
   }
@@ -218,11 +237,13 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
   }
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   const costText = renderCost(payload.cost, config);
+  const titleText = renderTitle(payload.conversation_title, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
+    [coloredBadge, ctx, tokens, bar, usage, titleText, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage, stateText],
     [coloredBadge, ctx, bar, usage, stateText],

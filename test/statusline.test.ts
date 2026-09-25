@@ -578,3 +578,60 @@ test("cost and wide workspace labels obey both layout width limits", () => {
     }
   }
 });
+
+// Antigravity CLI 1.1.27 added conversation_title to the status-line payload.
+function titled(title: unknown, width = 120): Payload {
+  return {
+    model: { display_name: "Claude Sonnet 4.6" }, cwd: "/workspace/project",
+    plan_tier: "Google AI Pro", agent_state: "idle", terminal_width: width,
+    conversation_title: title as string
+  };
+}
+
+test("conversation title stays hidden unless show_title is enabled", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false };
+  assert.equal(defaultConfig().showTitle, false);
+  assert.doesNotMatch(render(titled("Fix login"), { config, gitBranch: "main" }), /Fix login/);
+});
+
+test("multiline shows the conversation title between branch and state", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  const line1 = render(titled("Fix login"), { config, gitBranch: "main" }).split("\n")[0];
+  assert.equal(line1, "Sonnet 4.6 | Pro │ project │ main │ Fix login │ Idle");
+});
+
+test("conversation title cannot inject control sequences or break the layout", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  const out = render(titled("Fix\nlogin\x1b]0;pwned\x07 \u202Eflow\t"), { config, gitBranch: "main" });
+  assert.equal(out.split("\n").length, 2, "a newline in the title must not add a HUD line");
+  assert.doesNotMatch(out.split("\n")[0], /[\x00-\x1f\x7f\u202e]/);
+  assert.match(out.split("\n")[0], /│ Fix login ?\]0;pwned flow │ Idle$/);
+});
+
+test("long conversation titles are clipped to a bounded width", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  const line1 = render(titled("Refactor the quota probe discovery and hint cache"), { config, gitBranch: "main" }).split("\n")[0];
+  const segment = line1.split(" │ ")[3];
+  assert.ok(segment.endsWith("…"), segment);
+  assert.equal(visibleLen(segment), 24);
+});
+
+test("empty or non-string conversation titles are omitted", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  for (const title of ["", "   ", 42, null]) {
+    assert.equal(render(titled(title), { config, gitBranch: "main" }).split("\n")[0], "Sonnet 4.6 | Pro │ project │ main │ Idle");
+  }
+});
+
+test("multiline drops the conversation title before cost", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  const payload = { ...titled("Fix login", 50), cost: { total_usd: 0 } };
+  assert.equal(render(payload, { config, gitBranch: "main" }).split("\n")[0], "Sonnet 4.6 | Pro │ project │ main │ Idle │ $0.00");
+});
+
+test("single-line shows the conversation title before state and drops it first", () => {
+  const config = { ...defaultConfig(), multiline: false, color: false, showIcons: false, showTitle: true };
+  const payload: Payload = { ...titled("Fix login", 120), context_window: { used_percentage: 12 } };
+  assert.equal(render(payload, { config }), "Sonnet 4.6 | Pro  Ctx 12%  █░░░░░░░░░  Fix login  Idle");
+  assert.equal(render({ ...payload, terminal_width: 45 }, { config }), "Sonnet 4.6 | Pro  Ctx 12%  █░░░░░░░░░  Idle");
+});
