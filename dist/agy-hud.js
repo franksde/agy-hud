@@ -1577,7 +1577,7 @@ function nerdFontLines(report) {
 }
 
 // src/main.ts
-var version = "0.1.10";
+var version = "0.1.11";
 var consumedQuotaRefreshMs = 15 * 1e3;
 var untouchedQuotaRefreshMs = 30 * 1e3;
 function renderStatusline(input, cfg = defaultConfig(), cache = null) {

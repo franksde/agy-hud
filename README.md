@@ -195,7 +195,7 @@ For a genuinely new install:
 
    ```json
    {
-     "version": "0.1.10",
+     "version": "0.1.11",
      "homedir": "/home/u",
      "nodeVersion": "v22.14.0",
      "nodeOk": true,

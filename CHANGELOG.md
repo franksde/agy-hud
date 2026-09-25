@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.11 — 2026-09-25
 
 - Added `show_title`, off by default, to show the `conversation_title` that Antigravity CLI 1.1.27+ passes to status-line scripts. The title is reduced to one plain line with control characters and bidi overrides removed, so it cannot break the layout or send sequences to the terminal, is clipped to 24 columns, and is the first segment dropped on a narrow terminal.
 - Quota refreshes fall back to the official `agy -p /usage` command when the loopback server refuses them. From Antigravity CLI 1.2.2 on (verified on 1.2.11), the `agy` server answers `GetUserStatus` with `401 missing CSRF token`, and the status line is never given that token; `quota refresh` used to fail with a generic "Failed to query GetUserStatus", leaving only the payload quota, which does not move during a turn and was measured 25 minutes stale while idle. `/usage` starts no agent turn and spends no quota, but it starts a separate `agy` process for about 7 s, so it runs only in the background: at most every 60 s while a turn runs or has just settled, every 5 minutes while idle, one at a time across sessions, backing off from 60 s to 10 minutes after failures. The refusal is recorded per CLI version in `quota_cache.json.auth-rejected.json`; an update retries loopback. Other loopback failures never fall back, so older CLIs are unchanged. The nested `agy` marks its status line with `AGY_HUD_NESTED=1`, which renders without refreshing.
