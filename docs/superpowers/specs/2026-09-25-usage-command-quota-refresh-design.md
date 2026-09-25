@@ -85,9 +85,12 @@ readers ignore whichever field is absent.
 The payload carries no fetch time, so freshness is inferred from the quota itself. For each window
 (5h and weekly) where both the payload and the cache have a bucket:
 
-1. If the `reset_time` values differ by more than 60 s, the later one is a newer window: use it.
-2. Otherwise it is the same window, and remaining quota only goes down within a window: the lower
-   `remaining_fraction` is the more recent reading.
+1. A reading whose `reset_time` has passed describes a window that has ended: a cached one is
+   dropped, and a payload one yields to a live cached reading.
+2. A bucket has at most one live window, so two live readings are the same window, whatever their
+   `reset_time` says. An untouched bucket's `reset_time` floats with the query time, which is why it
+   cannot be used to order readings (review r1). Remaining quota only goes down within a window: the
+   lower `remaining_fraction` is the more recent reading.
 
 This replaces the current rule (a cache under 5 minutes old, 5h window only, and only when it shows
 more usage) for bucket-shaped caches, and it covers the weekly window as well. The per-model loopback
@@ -106,10 +109,18 @@ Evaluated on every redraw. At most one trigger fires, and every one goes through
 On failure, the next attempt waits 60 s, doubling to a 10-minute cap; a success resets the wait.
 These floors apply only to `/usage`. The loopback probe keeps its current intervals.
 
+The background `quota refresh` checks the backoff and a `/usage` cache younger than 60 s again
+before it runs `/usage`, so no route into it (the loopback path's lock, a takeover) can run agy more
+often. A background refresh without a CLI version never falls back to `/usage`: there is nothing to
+key the backoff on. A manual `quota refresh` is not paced.
+
 ### Lock
 
 One refresh in flight across every session: a lock file next to the cache, taken with an exclusive
-create, holding the PID and start time. A lock older than 60 s is stale and may be taken over.
+create, holding a random owner token that the status line passes to the refresh it spawns. Only the
+refresh holding that token removes the lock; a manual refresh never does. A lock older than 120 s
+(a loopback probe followed by the 45 s `/usage` run) is stale: it is renamed aside under a unique
+name and the exclusive create is retried, so two status lines cannot both take it over.
 
 ## Acceptance
 

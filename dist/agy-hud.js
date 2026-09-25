@@ -166,6 +166,7 @@ var import_node_fs6 = __toESM(require("node:fs"));
 var import_node_os2 = __toESM(require("node:os"));
 var import_node_path5 = __toESM(require("node:path"));
 var import_node_child_process3 = require("node:child_process");
+var import_node_crypto = require("node:crypto");
 
 // src/config.ts
 var import_node_fs = __toESM(require("node:fs"));
@@ -607,7 +608,7 @@ function parseUsageOutput(stdout) {
       const id = bucket.id;
       const fraction = bucket.remaining_fraction;
       const reset = bucket.reset_time;
-      if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) continue;
+      if (typeof id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(id)) continue;
       if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) continue;
       if (typeof reset !== "string" || !Number.isFinite(Date.parse(reset))) continue;
       quota[id] = { remaining_fraction: fraction, reset_time: reset };
@@ -663,6 +664,12 @@ function runAgy(args, env, options = {}) {
     });
     child.on("error", (error) => finish({ code: null, stdout: "", timedOut: false, error: String(error) }));
     child.on("close", (code) => finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut }));
+    child.on("exit", (code) => {
+      setTimeout(() => {
+        killGroup();
+        finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut });
+      }, 500).unref();
+    });
   });
 }
 function record(value) {
@@ -813,7 +820,7 @@ function formatCost(usd) {
 var titleColumns = 24;
 function renderTitle(raw, config) {
   if (!config.showTitle || typeof raw !== "string") return "";
-  const text = raw.replace(/[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, " ").trim().split(/\s+/).filter(Boolean).join(" ");
+  const text = raw.replace(new RegExp("\\p{Cc}", "gu"), " ").replace(new RegExp("\\p{Cf}", "gu"), "").trim().split(/\s+/).filter(Boolean).join(" ");
   if (text === "") return "";
   const clipped = visibleLen(text) > titleColumns ? `${truncateColumns(text, titleColumns - 1)}\u2026` : text;
   return colorize(clipped, colorMuted, config.color);
@@ -994,7 +1001,7 @@ function withIcon(config, icon, fallback) {
 function quotaInfo(cache, modelDisplay, officialQuota, now) {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets), modelDisplay);
+    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now), modelDisplay);
     if (merged !== null) {
       return merged;
     }
@@ -1039,7 +1046,7 @@ function liveCachedBuckets(cache, now) {
   }
   return Object.keys(live).length > 0 ? live : null;
 }
-function mergeQuotaBuckets(official, cached) {
+function mergeQuotaBuckets(official, cached, now) {
   const merged = { ...official };
   for (const [key, fromCache] of Object.entries(cached)) {
     const fromPayload = Object.prototype.hasOwnProperty.call(official, key) ? official[key] : void 0;
@@ -1048,10 +1055,8 @@ function mergeQuotaBuckets(official, cached) {
       continue;
     }
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
-    const cacheReset = Date.parse(fromCache.reset_time ?? "");
-    if (Number.isFinite(payloadReset) && Math.abs(cacheReset - payloadReset) > 60 * 1e3) {
-      merged[key] = cacheReset > payloadReset ? fromCache : fromPayload;
-    } else if ((fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
+    const payloadEnded = Number.isFinite(payloadReset) && payloadReset <= now.getTime();
+    if (payloadEnded || (fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
       merged[key] = fromCache;
     }
   }
@@ -1814,18 +1819,26 @@ async function runCli(args, deps = {}) {
     if (args[1] === "refresh") {
       const cachePath = quotaCacheWritePath();
       const lockPath = cachePath + ".lock";
-      const cliVersion = args[2] === "--cli-version" ? safeCliVersion(args[3]) : "";
+      const flags = refreshFlags(args.slice(2));
+      const cliVersion = flags.cliVersion;
       try {
         let result = null;
         if (!authRejectedFor(cachePath, cliVersion)) {
           result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
           recordAuthRejection(cachePath, result, cliVersion);
         }
-        if (result === null || !result.ok && result.authRejected) {
-          const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
-          recordUsageOutcome(cachePath, cliVersion, outcome.ok);
-          result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+        const usageNeeded = result === null || !result.ok && result.authRejected === true;
+        if (usageNeeded && (!flags.background || cliVersion !== "")) {
+          const skip = flags.background ? usageSkipReason(cachePath, /* @__PURE__ */ new Date()) : null;
+          if (skip !== null) {
+            result = skip;
+          } else {
+            const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
+            result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+            recordUsageOutcome(cachePath, cliVersion, result.ok);
+          }
         }
+        result ??= { ok: false, message: "No quota source was tried." };
         stderr(`[quota_probe] ${result.message}
 `);
         if (result.ok && result.summary) {
@@ -1839,7 +1852,7 @@ async function runCli(args, deps = {}) {
         return 2;
       } finally {
         try {
-          if (import_node_fs6.default.existsSync(lockPath)) {
+          if (flags.lockToken !== "" && import_node_fs6.default.readFileSync(lockPath, "utf8") === flags.lockToken) {
             import_node_fs6.default.unlinkSync(lockPath);
           }
         } catch {
@@ -1929,9 +1942,10 @@ function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repa
   const nextState = mergeStatuslineRefreshState(prevState, payload, activityRefresh, now);
   saveStatuslineRefreshState(statePath, nextState);
   const lockPath = cachePath + ".lock";
+  const lockToken = (0, import_node_crypto.randomUUID)();
   if (probeRejected) {
-    if (usageRefreshDue(cache, payload, prevState, readRejectionMarker(cachePath), now) && takeUsageLock(lockPath, now)) {
-      spawnQuotaRefresh(cliVersion);
+    if (usageRefreshDue(cache, payload, prevState, readRejectionMarker(cachePath), now) && takeUsageLock(lockPath, lockToken, now)) {
+      spawnQuotaRefresh(cliVersion, lockToken);
     }
     return;
   }
@@ -1946,14 +1960,22 @@ function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repa
         return;
       }
     }
-    import_node_fs6.default.writeFileSync(lockPath, (/* @__PURE__ */ new Date()).toISOString(), "utf8");
-    spawnQuotaRefresh(cliVersion);
+    import_node_fs6.default.writeFileSync(lockPath, lockToken, { encoding: "utf8", mode: 384 });
+    spawnQuotaRefresh(cliVersion, lockToken);
   } catch {
   }
 }
-function spawnQuotaRefresh(cliVersion) {
+function spawnQuotaRefresh(cliVersion, lockToken) {
   try {
-    const args = [__filename, "quota", "refresh", ...cliVersion ? ["--cli-version", cliVersion] : []];
+    const args = [
+      __filename,
+      "quota",
+      "refresh",
+      ...cliVersion ? ["--cli-version", cliVersion] : [],
+      "--background",
+      "--lock-token",
+      lockToken
+    ];
     const child = (0, import_node_child_process3.spawn)(process.argv[0], args, {
       detached: true,
       stdio: "ignore"
@@ -1964,7 +1986,35 @@ function spawnQuotaRefresh(cliVersion) {
 }
 var usageActiveFloorMs = 60 * 1e3;
 var usageIdleFloorMs = 5 * 60 * 1e3;
-var usageLockStaleMs = 60 * 1e3;
+var usageLockStaleMs = 120 * 1e3;
+function refreshFlags(args) {
+  const flags = { cliVersion: "", background: false, lockToken: "" };
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--cli-version") {
+      flags.cliVersion = safeCliVersion(args[index + 1]);
+      index += 1;
+    } else if (args[index] === "--lock-token") {
+      const token = args[index + 1] ?? "";
+      flags.lockToken = /^[0-9A-Za-z-]{1,64}$/.test(token) ? token : "";
+      index += 1;
+    } else if (args[index] === "--background") {
+      flags.background = true;
+    }
+  }
+  return flags;
+}
+function usageSkipReason(cachePath, now) {
+  const retryAt = Date.parse(readRejectionMarker(cachePath)?.usageRetryAt ?? "");
+  if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
+    return { ok: false, message: "Skipped agy /usage: backing off after a failure." };
+  }
+  const [cache, ok] = load(cachePath);
+  const cacheTime = Date.parse(cache?.timestamp ?? "");
+  if (ok && cache?.source === "usage" && Number.isFinite(cacheTime) && now.getTime() - cacheTime < usageActiveFloorMs) {
+    return { ok: true, message: "Skipped agy /usage: the cached quota is fresh." };
+  }
+  return null;
+}
 function usageRefreshDue(cache, payload, prevState, marker, now) {
   const retryAt = Date.parse(marker?.usageRetryAt ?? "");
   if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
@@ -1972,12 +2022,13 @@ function usageRefreshDue(cache, payload, prevState, marker, now) {
   }
   const agentState = normalizeAgentState(payload?.agent_state);
   const prevAgentState = prevState?.agentState ?? "";
-  const active = agentState !== "idle" || prevAgentState !== "" && prevAgentState !== "idle";
+  const isActive = (value) => value !== "" && value !== "idle";
+  const active = isActive(agentState) || isActive(prevAgentState);
   const cacheTime = Date.parse(cache?.timestamp ?? "");
   const age = Number.isFinite(cacheTime) ? now.getTime() - cacheTime : Infinity;
   return age > (active ? usageActiveFloorMs : usageIdleFloorMs);
 }
-function takeUsageLock(lockPath, now) {
+function takeUsageLock(lockPath, token, now) {
   try {
     import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(lockPath), { recursive: true, mode: 448 });
   } catch {
@@ -1985,7 +2036,7 @@ function takeUsageLock(lockPath, now) {
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      import_node_fs6.default.writeFileSync(lockPath, now.toISOString(), { encoding: "utf8", flag: "wx", mode: 384 });
+      import_node_fs6.default.writeFileSync(lockPath, token, { encoding: "utf8", flag: "wx", mode: 384 });
       return true;
     } catch (error) {
       if (error.code !== "EEXIST") {
@@ -1995,9 +2046,13 @@ function takeUsageLock(lockPath, now) {
         if (now.getTime() - import_node_fs6.default.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
           return false;
         }
-        import_node_fs6.default.rmSync(lockPath, { force: true });
-      } catch {
-        return false;
+        const aside = `${lockPath}.stale-${token}`;
+        import_node_fs6.default.renameSync(lockPath, aside);
+        import_node_fs6.default.rmSync(aside, { force: true });
+      } catch (takeoverError) {
+        if (takeoverError.code !== "ENOENT") {
+          return false;
+        }
       }
     }
   }

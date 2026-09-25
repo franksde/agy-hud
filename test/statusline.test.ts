@@ -671,15 +671,31 @@ test("the payload wins a window where it already shows less left", () => {
   assert.match(line, /Usage \S+ 70% \(↻ 4h 29m\) \| .*85% \(↻ 3d 21h\)/);
 });
 
-test("a later reset_time is a newer window and wins even with more left", () => {
+test("an expired payload window yields to the live cached one", () => {
   const line = bucketRender(
     { "gemini-5h": { remaining_fraction: 0.3, reset_time: "2026-06-15T03:00:00Z" },
       "gemini-weekly": { remaining_fraction: 0.85, reset_time: weeklyReset } },
     { "gemini-5h": { remaining_fraction: 0.95, reset_time: fiveHourReset },
       "gemini-weekly": { remaining_fraction: 0.85, reset_time: weeklyReset } },
-    "2026-06-15T02:59:00Z"
+    "2026-06-15T03:30:00Z"
   );
   assert.match(line, /Usage \S+ 95% /);
+});
+
+// An untouched bucket has no window yet, so its reset_time floats with the query time. Two live
+// readings of one bucket are always the same window, whatever their reset times say.
+test("an untouched bucket whose reset floats later never erases usage in the live window", () => {
+  const floating = "2026-06-15T08:40:00Z";
+  const cacheUntouched = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset, reset_in_seconds: 16151 } },
+    { "gemini-5h": { remaining_fraction: 1, reset_time: floating } }
+  );
+  assert.match(cacheUntouched, /Usage \S+ 85% /);
+  const payloadUntouched = bucketRender(
+    { "gemini-5h": { remaining_fraction: 1, reset_time: floating, reset_in_seconds: 17280 } },
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset } }
+  );
+  assert.match(payloadUntouched, /Usage \S+ 85% /);
 });
 
 test("a cached bucket whose window has already reset is ignored", () => {
@@ -709,4 +725,14 @@ test("third-party models read the third-party buckets of a usage cache", () => {
     quota: { "3p-5h": { remaining_fraction: 0.5, reset_time: fiveHourReset }, "gemini-5h": { remaining_fraction: 0.2, reset_time: fiveHourReset } } };
   const out = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") }));
   assert.match(out, /50% left/);
+});
+
+test("a title made only of invisible format characters is omitted", () => {
+  const config = { ...defaultConfig(), color: false, showIcons: false, showTitle: true };
+  const payload: Payload = {
+    model: { display_name: "Claude Sonnet 4.6" }, cwd: "/workspace/project",
+    plan_tier: "Google AI Pro", agent_state: "idle", terminal_width: 120,
+    conversation_title: "\u200B\u200D\uFEFF\u2060"
+  };
+  assert.equal(render(payload, { config, gitBranch: "main" }).split("\n")[0], "Sonnet 4.6 | Pro │ project │ main │ Idle");
 });

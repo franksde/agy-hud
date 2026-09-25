@@ -109,11 +109,12 @@ export function formatCost(usd: number): string {
 const titleColumns = 24;
 
 // The title is free text the user or the model chose, so it is reduced to one plain line: control
-// characters (newlines, ESC/OSC sequences, BEL) and bidi overrides would otherwise break the HUD
-// layout or reach the terminal as commands.
+// characters (newlines, ESC/OSC sequences, BEL) would otherwise break the HUD layout or reach the
+// terminal as commands. Format characters (bidi overrides, zero-width spaces and joiners) are dropped,
+// so an invisible title cannot take up columns or reorder the line.
 function renderTitle(raw: unknown, config: Config): string {
   if (!config.showTitle || typeof raw !== "string") return "";
-  const text = raw.replace(/[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, " ").trim().split(/\s+/).filter(Boolean).join(" ");
+  const text = raw.replace(/\p{Cc}/gu, " ").replace(/\p{Cf}/gu, "").trim().split(/\s+/).filter(Boolean).join(" ");
   if (text === "") return "";
   const clipped = visibleLen(text) > titleColumns ? `${truncateColumns(text, titleColumns - 1)}…` : text;
   return colorize(clipped, colorMuted, config.color);
@@ -307,7 +308,7 @@ function withIcon(config: Config, icon: string, fallback: string): string {
 function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, officialQuota: Record<string, OfficialQuotaBucket> | undefined, now: Date): QuotaDisplay {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets), modelDisplay);
+    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now), modelDisplay);
     if (merged !== null) {
       return merged;
     }
@@ -358,12 +359,15 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
   return Object.keys(live).length > 0 ? live : null;
 }
 
-// The payload carries no fetch time, so freshness is read off the quota itself. A reset_time more than
-// a minute later belongs to a newer window. Within one window quota only goes down, so the lower
-// remainder is the more recent reading.
+// The payload carries no fetch time, so freshness is read off the quota itself. A bucket has at most
+// one live window: a payload reading whose window has already reset yields to the live cached one.
+// Two live readings are the same window, whatever their reset times say (an untouched bucket's
+// reset_time floats with the query time), and quota only goes down within a window, so the lower
+// remainder is the more recent reading. Cached readings of an ended window never get this far.
 function mergeQuotaBuckets(
   official: Record<string, OfficialQuotaBucket>,
-  cached: Record<string, OfficialQuotaBucket>
+  cached: Record<string, OfficialQuotaBucket>,
+  now: Date
 ): Record<string, OfficialQuotaBucket> {
   const merged: Record<string, OfficialQuotaBucket> = { ...official };
   for (const [key, fromCache] of Object.entries(cached)) {
@@ -373,10 +377,8 @@ function mergeQuotaBuckets(
       continue;
     }
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
-    const cacheReset = Date.parse(fromCache.reset_time ?? "");
-    if (Number.isFinite(payloadReset) && Math.abs(cacheReset - payloadReset) > 60 * 1000) {
-      merged[key] = cacheReset > payloadReset ? fromCache : fromPayload;
-    } else if ((fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
+    const payloadEnded = Number.isFinite(payloadReset) && payloadReset <= now.getTime();
+    if (payloadEnded || (fromCache.remaining_fraction ?? 1) < (fromPayload.remaining_fraction ?? 1)) {
       merged[key] = fromCache;
     }
   }

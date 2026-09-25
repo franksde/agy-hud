@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { defaultConfig, loadFromPaths, Config } from "./config";
 import { Cache, CachedQuotaBucket, load as loadQuota, matchModel } from "./quota";
 import { RefreshResult, refreshQuota } from "./quotaProbe";
@@ -314,7 +315,8 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
     if (args[1] === "refresh") {
       const cachePath = quotaCacheWritePath();
       const lockPath = cachePath + ".lock";
-      const cliVersion = args[2] === "--cli-version" ? safeCliVersion(args[3]) : "";
+      const flags = refreshFlags(args.slice(2));
+      const cliVersion = flags.cliVersion;
       try {
         // Loopback first, as it is cheaper. Only a refusal falls back to /usage, so a CLI whose loopback
         // server is merely not running behaves exactly as before. A version already known to refuse
@@ -324,11 +326,22 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
           result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
           recordAuthRejection(cachePath, result, cliVersion);
         }
-        if (result === null || (!result.ok && result.authRejected)) {
-          const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
-          recordUsageOutcome(cachePath, cliVersion, outcome.ok);
-          result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+        // A background refresh needs the CLI version to key the backoff on, and paces /usage itself as
+        // well, so a refresh reaching it by any route (the loopback path, a lock takeover) cannot run
+        // agy more often than the status line would. A manual refresh is never paced.
+        const usageNeeded = result === null || (!result.ok && result.authRejected === true);
+        if (usageNeeded && (!flags.background || cliVersion !== "")) {
+          const skip = flags.background ? usageSkipReason(cachePath, new Date()) : null;
+          if (skip !== null) {
+            result = skip;
+          } else {
+            const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
+            result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+            recordUsageOutcome(cachePath, cliVersion, result.ok);
+          }
         }
+        // Loopback is only skipped for a known version, which always reaches /usage above.
+        result ??= { ok: false, message: "No quota source was tried." };
         stderr(`[quota_probe] ${result.message}\n`);
         if (result.ok && result.summary) {
           stdout(`${result.summary}\n`);
@@ -338,8 +351,10 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
         stderr(`[quota_probe] ${error instanceof Error ? error.message : String(error)}\n`);
         return 2;
       } finally {
+        // Only the refresh the lock was taken for may release it. After a stale-lock takeover the lock
+        // belongs to a newer refresh, and a manual refresh never holds it at all.
         try {
-          if (fs.existsSync(lockPath)) {
+          if (flags.lockToken !== "" && fs.readFileSync(lockPath, "utf8") === flags.lockToken) {
             fs.unlinkSync(lockPath);
           }
         } catch {
@@ -454,9 +469,10 @@ function triggerBackgroundRefreshIfNeeded(
   saveStatuslineRefreshState(statePath, nextState);
 
   const lockPath = cachePath + ".lock";
+  const lockToken = randomUUID();
   if (probeRejected) {
-    if (usageRefreshDue(cache, payload, prevState, readRejectionMarker(cachePath), now) && takeUsageLock(lockPath, now)) {
-      spawnQuotaRefresh(cliVersion);
+    if (usageRefreshDue(cache, payload, prevState, readRejectionMarker(cachePath), now) && takeUsageLock(lockPath, lockToken, now)) {
+      spawnQuotaRefresh(cliVersion, lockToken);
     }
     return;
   }
@@ -472,16 +488,20 @@ function triggerBackgroundRefreshIfNeeded(
         return;
       }
     }
-    fs.writeFileSync(lockPath, new Date().toISOString(), "utf8");
-    spawnQuotaRefresh(cliVersion);
+    fs.writeFileSync(lockPath, lockToken, { encoding: "utf8", mode: 0o600 });
+    spawnQuotaRefresh(cliVersion, lockToken);
   } catch {
     // ignore
   }
 }
 
-function spawnQuotaRefresh(cliVersion: string): void {
+function spawnQuotaRefresh(cliVersion: string, lockToken: string): void {
   try {
-    const args = [__filename, "quota", "refresh", ...(cliVersion ? ["--cli-version", cliVersion] : [])];
+    const args = [
+      __filename, "quota", "refresh",
+      ...(cliVersion ? ["--cli-version", cliVersion] : []),
+      "--background", "--lock-token", lockToken
+    ];
     const child = spawn(process.argv[0], args, {
       detached: true,
       stdio: "ignore"
@@ -497,7 +517,45 @@ function spawnQuotaRefresh(cliVersion: string): void {
 // no run at all while a failure backoff is pending.
 const usageActiveFloorMs = 60 * 1000;
 const usageIdleFloorMs = 5 * 60 * 1000;
-const usageLockStaleMs = 60 * 1000;
+// Longer than the slowest refresh: a loopback probe on the first refusal, then the 45 s /usage run.
+const usageLockStaleMs = 120 * 1000;
+
+interface RefreshFlags {
+  cliVersion: string;
+  background: boolean;
+  lockToken: string;
+}
+
+function refreshFlags(args: string[]): RefreshFlags {
+  const flags: RefreshFlags = { cliVersion: "", background: false, lockToken: "" };
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--cli-version") {
+      flags.cliVersion = safeCliVersion(args[index + 1]);
+      index += 1;
+    } else if (args[index] === "--lock-token") {
+      const token = args[index + 1] ?? "";
+      flags.lockToken = /^[0-9A-Za-z-]{1,64}$/.test(token) ? token : "";
+      index += 1;
+    } else if (args[index] === "--background") {
+      flags.background = true;
+    }
+  }
+  return flags;
+}
+
+// The child's own pacing check: a pending backoff, or a /usage cache younger than the active floor.
+function usageSkipReason(cachePath: string, now: Date): RefreshResult | null {
+  const retryAt = Date.parse(readRejectionMarker(cachePath)?.usageRetryAt ?? "");
+  if (Number.isFinite(retryAt) && retryAt > now.getTime()) {
+    return { ok: false, message: "Skipped agy /usage: backing off after a failure." };
+  }
+  const [cache, ok] = loadQuota(cachePath);
+  const cacheTime = Date.parse(cache?.timestamp ?? "");
+  if (ok && cache?.source === "usage" && Number.isFinite(cacheTime) && now.getTime() - cacheTime < usageActiveFloorMs) {
+    return { ok: true, message: "Skipped agy /usage: the cached quota is fresh." };
+  }
+  return null;
+}
 
 function usageRefreshDue(
   cache: Cache | null,
@@ -512,15 +570,17 @@ function usageRefreshDue(
   }
   const agentState = normalizeAgentState(payload?.agent_state);
   const prevAgentState = prevState?.agentState ?? "";
-  const active = agentState !== "idle" || (prevAgentState !== "" && prevAgentState !== "idle");
+  const isActive = (value: string) => value !== "" && value !== "idle";
+  const active = isActive(agentState) || isActive(prevAgentState);
   const cacheTime = Date.parse(cache?.timestamp ?? "");
   const age = Number.isFinite(cacheTime) ? now.getTime() - cacheTime : Infinity;
   return age > (active ? usageActiveFloorMs : usageIdleFloorMs);
 }
 
-// One /usage run at a time across every session. The lock is taken with an exclusive create; one
-// older than the longest possible run (45 s) belongs to a refresh that died, and is taken over.
-function takeUsageLock(lockPath: string, now: Date): boolean {
+// One /usage run at a time across every session. The lock holds the owner's token and is taken with
+// an exclusive create. One older than the slowest refresh belongs to a refresh that died; it is moved
+// aside under a unique name before retrying, so two status lines racing for it cannot both win.
+function takeUsageLock(lockPath: string, token: string, now: Date): boolean {
   try {
     fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
   } catch {
@@ -528,7 +588,7 @@ function takeUsageLock(lockPath: string, now: Date): boolean {
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      fs.writeFileSync(lockPath, now.toISOString(), { encoding: "utf8", flag: "wx", mode: 0o600 });
+      fs.writeFileSync(lockPath, token, { encoding: "utf8", flag: "wx", mode: 0o600 });
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
@@ -538,9 +598,14 @@ function takeUsageLock(lockPath: string, now: Date): boolean {
         if (now.getTime() - fs.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
           return false;
         }
-        fs.rmSync(lockPath, { force: true });
-      } catch {
-        return false;
+        const aside = `${lockPath}.stale-${token}`;
+        fs.renameSync(lockPath, aside);
+        fs.rmSync(aside, { force: true });
+      } catch (takeoverError) {
+        // Someone else moved the stale lock first: try the exclusive create once more.
+        if ((takeoverError as NodeJS.ErrnoException).code !== "ENOENT") {
+          return false;
+        }
       }
     }
   }

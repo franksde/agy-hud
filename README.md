@@ -336,11 +336,11 @@ On such a CLI, `quota refresh` falls back to the official read-only command `agy
 | A turn is running, or has just settled | 60 s |
 | The CLI sits idle (a redraw from typing, for example) | 5 minutes |
 
-Only one run happens at a time across every session. A failing run backs off for 60 s, doubling to 10 minutes. The `agy` it starts renders the status line too; agy-hud marks that child with `AGY_HUD_NESTED=1`, and a status line carrying the mark only renders.
+Only one run happens at a time across every session: a lock next to the cache names its owner, only that owner removes it, and one older than 2 minutes is taken over. A failing run backs off for 60 s, doubling to 10 minutes. The `agy` it starts renders the status line too; agy-hud marks that child with `AGY_HUD_NESTED=1`, and a status line carrying the mark only renders.
 
 The refusal is recorded in `quota_cache.json.auth-rejected.json` (or `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`) together with the CLI `version` from the status-line payload, plus the backoff. While the payload reports that version, refreshes go straight to `/usage`. After a CLI update the next refresh tries loopback again, and a loopback success deletes the file. A payload without a version never counts as refused, and a manual `quota refresh` always tries loopback first. Any other loopback failure, such as no running server, never falls back to `/usage`, so older CLIs behave exactly as before.
 
-A `/usage` cache holds the same buckets as the payload's `quota` field. For each window, 5h and weekly, the HUD shows the fresher of the two readings: a `reset_time` more than a minute later is a newer window, and within one window the lower remainder is the newer reading. Cached buckets whose window has already reset are ignored.
+A `/usage` cache holds the same buckets as the payload's `quota` field. For each window, 5h and weekly, the HUD shows the fresher of the two readings. A reading whose `reset_time` has passed belongs to an ended window: a cached one is ignored, and a payload one yields to the cache. Two live readings are the same window, and quota only goes down within a window, so the lower remainder is the newer reading. (An untouched bucket's `reset_time` moves with each query, so it cannot order readings.)
 
 Expected sanitized cache shape:
 

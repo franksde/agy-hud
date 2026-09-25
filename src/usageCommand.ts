@@ -64,7 +64,7 @@ export function parseUsageOutput(stdout: string): Record<string, CachedQuotaBuck
       const id = bucket.id;
       const fraction = bucket.remaining_fraction;
       const reset = bucket.reset_time;
-      if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) continue;
+      if (typeof id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(id)) continue;
       if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) continue;
       if (typeof reset !== "string" || !Number.isFinite(Date.parse(reset))) continue;
       quota[id] = { remaining_fraction: fraction, reset_time: reset };
@@ -132,6 +132,14 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
     });
     child.on("error", error => finish({ code: null, stdout: "", timedOut: false, error: String(error) }));
     child.on("close", code => finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut }));
+    // A helper that agy leaves behind can hold the output pipe open after agy itself has exited, which
+    // would hold "close" back until the timeout. Give the pipe a moment to drain, then end the run.
+    child.on("exit", code => {
+      setTimeout(() => {
+        killGroup();
+        finish({ code, stdout: Buffer.concat(chunks).toString("utf8"), timedOut });
+      }, 500).unref();
+    });
   });
 }
 

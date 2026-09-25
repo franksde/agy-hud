@@ -1317,6 +1317,73 @@ test("/usage refreshes respect a live lock and take over a stale one", async () 
     const when = new Date(Date.now() - ageMs);
     fs.utimesSync(lockPath, when, when);
   };
-  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, lock(20_000)), false, "a 20 s old lock is live");
-  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, lock(2 * 60_000)), true, "a 2 min old lock is stale");
+  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, lock(90_000)), false, "a 90 s old lock is live");
+  assert.equal(await usageModeSpawns("working", "working", 10 * 60_000, lock(3 * 60_000)), true, "a 3 min old lock is stale");
+});
+
+function writeUsageCache(cachePath: string, ageMs: number): void {
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fs.writeFileSync(cachePath, JSON.stringify({
+    timestamp: new Date(Date.now() - ageMs).toISOString(), source: "usage", models: {},
+    quota: { "gemini-5h": { remaining_fraction: 0.9, reset_time: "2099-01-01T00:00:00Z" } }
+  }), "utf8");
+}
+
+test("a background refresh without a CLI version never falls back to /usage", async () => {
+  const fixture = homeFixture();
+  const result = await runQuotaRefresh(fixture, ["--background"], rejected);
+  assert.equal(result.code, 2);
+  assert.deepEqual(result.calls, { loopback: 1, usage: 0 });
+});
+
+test("a background refresh paces /usage itself: a fresh /usage cache or a pending backoff skips it", async () => {
+  const fixture = homeFixture();
+  writeAuthRejected(fixture, "1.2.11");
+  writeUsageCache(fixture.writePath, 20_000);
+  const fresh = await runQuotaRefresh(fixture, ["--cli-version", "1.2.11", "--background"], rejected);
+  assert.equal(fresh.code, 0);
+  assert.deepEqual(fresh.calls, { loopback: 0, usage: 0 });
+
+  writeUsageCache(fixture.writePath, 10 * 60_000);
+  fs.writeFileSync(authRejectedPath(fixture), JSON.stringify({ cliVersion: "1.2.11", usageFailures: 1, usageRetryAt: new Date(Date.now() + 60_000).toISOString() }));
+  assert.deepEqual((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11", "--background"], rejected)).calls, { loopback: 0, usage: 0 });
+
+  assert.deepEqual((await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected)).calls, { loopback: 0, usage: 1 }, "a manual refresh is not paced");
+});
+
+test("only the refresh holding the lock token removes the lock", async () => {
+  const fixture = homeFixture();
+  const lockPath = `${fixture.writePath}.lock`;
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  fs.writeFileSync(lockPath, "token-a");
+  const ok: Outcome = { ok: true, message: "refreshed" };
+
+  await runQuotaRefresh(fixture, [], ok);
+  assert.equal(fs.existsSync(lockPath), true, "a manual refresh holds no lock and must not remove one");
+  await runQuotaRefresh(fixture, ["--background", "--lock-token", "token-b"], ok);
+  assert.equal(fs.existsSync(lockPath), true, "a refresh must not remove a lock another refresh took over");
+  await runQuotaRefresh(fixture, ["--background", "--lock-token", "token-a"], ok);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test("the background refresh is spawned with its lock token", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10 * 60_000);
+  writeRefreshState(fixture.writePath, "working");
+  writeAuthRejected(fixture, "1.2.11");
+  await runStatuslineInHome(fixture, versionedPayload("1.2.11", "working"));
+  assert.equal(await waitForSpawn(fixture.markerPath), true);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const token = fs.readFileSync(`${fixture.writePath}.lock`, "utf8");
+  assert.match(fs.readFileSync(fixture.markerPath, "utf8"), new RegExp(`--background --lock-token ${token}`));
+  assert.equal(fs.statSync(`${fixture.writePath}.lock`).mode & 0o077, 0);
+});
+
+test("a /usage success whose cache write fails still backs off", async () => {
+  const fixture = homeFixture();
+  writeAuthRejected(fixture, "1.2.11");
+  fs.mkdirSync(fixture.writePath, { recursive: true });
+  const result = await runQuotaRefresh(fixture, ["--cli-version", "1.2.11"], rejected, usageOk);
+  assert.equal(result.code, 2);
+  assert.equal(readMarker(fixture).usageFailures, 1);
 });

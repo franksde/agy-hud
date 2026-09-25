@@ -111,3 +111,18 @@ test("runAgy reports a missing binary instead of throwing", async () => {
   assert.equal(result.code, null);
   assert.match(result.error ?? "", /ENOENT/);
 });
+
+test("runAgy finishes when agy exits even if a leftover child still holds the output pipe", async () => {
+  const { command } = fakeAgy("(sleep 5 &); echo '{\"ok\":1}'");
+  const started = Date.now();
+  const result = await runAgy([], process.env, { command, timeoutMs: 4000 });
+  assert.equal(result.code, 0);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.stdout.trim(), '{"ok":1}');
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+});
+
+test("bucket ids may contain underscores", () => {
+  const parsed = parseUsageOutput(usageJson([{ id: "3p_weekly", remaining_fraction: 0.5, reset_time: "2026-09-25T14:51:03Z" }]));
+  assert.equal(parsed?.["3p_weekly"]?.remaining_fraction, 0.5);
+});
