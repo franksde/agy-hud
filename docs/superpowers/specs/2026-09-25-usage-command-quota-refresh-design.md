@@ -1,7 +1,7 @@
 # Quota Refresh Through `agy -p /usage`
 
 **Date**: 2026-09-25
-**Status**: Approved 2026-09-25
+**Status**: Implemented in 0.1.11 (2026-09-25)
 **Target version**: 0.1.11
 
 ## Problem
@@ -128,7 +128,7 @@ name and the exclusive create is retried, so two status lines cannot both take i
 
 - On 1.2.11, during a turn that runs longer than 2 minutes, the HUD's 5h quota changes before the
   turn ends.
-- The redraw at the end of a turn takes no longer than it does with the probe paused (about 60 ms).
+- The redraw at the end of a turn runs no probe for a refusing CLI version (about 60 ms, measured).
 - With two agy sessions open, `ps` never shows more than one `agy -p /usage` spawned by agy-hud.
 - `AGY_HUD_NESTED=1 agy-hud statusline` never spawns a process (unit test).
 - Merge: tests cover a later window beating a lower value, the same window with the lower value
