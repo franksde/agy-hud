@@ -284,24 +284,32 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
+    const cliVersion = safeCliVersion(payload?.version);
+    const probeRejected = authRejectedFor(cachePath, cliVersion);
     const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(
       cachePath,
       ok ? cache : null,
       payload,
-      deps.refreshQuota ?? refreshQuota
+      deps.refreshQuota ?? refreshQuota,
+      cliVersion,
+      probeRejected
     );
     // A same-frame refresh already rewrote the write path, so a corrupt primary is repaired by now.
     // Passing the stale flag on would spawn a second probe for damage that no longer exists.
-    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed);
+    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed, cliVersion, probeRejected);
     stdout(`${renderStatusline(raw, cfg, displayCache)}\n`);
     return 0;
   }
 
   if (command === "quota") {
     if (args[1] === "refresh") {
-      const lockPath = quotaCacheWritePath() + ".lock";
+      const cachePath = quotaCacheWritePath();
+      const lockPath = cachePath + ".lock";
+      const cliVersion = args[2] === "--cli-version" ? safeCliVersion(args[3]) : "";
       try {
-        const result = await (deps.refreshQuota ?? refreshQuota)(quotaCacheWritePath());
+        // A manual refresh always probes, so it can also confirm that a recorded rejection still holds.
+        const result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
+        recordAuthRejection(cachePath, result, cliVersion);
         stderr(`[quota_probe] ${result.message}\n`);
         if (result.ok && result.summary) {
           stdout(`${result.summary}\n`);
@@ -362,13 +370,16 @@ async function refreshQuotaBeforeRenderIfNeeded(
   cachePath: string,
   cache: Cache | null,
   payload: Payload | null,
-  refresh: (cachePath: string) => Promise<RefreshResult>
+  refresh: (cachePath: string) => Promise<RefreshResult>,
+  cliVersion: string,
+  probeRejected: boolean
 ): Promise<[Cache | null, boolean]> {
-  if (!shouldRefreshBeforeRender(cachePath, payload, new Date())) {
+  if (probeRejected || !shouldRefreshBeforeRender(cachePath, payload, new Date())) {
     return [cache, false];
   }
   try {
     const result = await refresh(cachePath);
+    recordAuthRejection(cachePath, result, cliVersion);
     if (!result.ok) {
       return [cache, false];
     }
@@ -412,7 +423,9 @@ function triggerBackgroundRefreshIfNeeded(
   cachePath: string,
   cache: Cache | null,
   payload: Payload | null = null,
-  repairRefresh = false
+  repairRefresh = false,
+  cliVersion = "",
+  probeRejected = false
 ): void {
   const now = new Date();
   const statePath = refreshStatePath(cachePath);
@@ -421,7 +434,7 @@ function triggerBackgroundRefreshIfNeeded(
   const nextState = mergeStatuslineRefreshState(prevState, payload, activityRefresh, now);
   saveStatuslineRefreshState(statePath, nextState);
 
-  if (!quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh) {
+  if (probeRejected || (!quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh)) {
     return;
   }
 
@@ -437,7 +450,8 @@ function triggerBackgroundRefreshIfNeeded(
     fs.writeFileSync(lockPath, new Date().toISOString(), "utf8");
 
     const nodePath = process.argv[0];
-    const child = spawn(nodePath, [__filename, "quota", "refresh"], {
+    const args = [__filename, "quota", "refresh", ...(cliVersion ? ["--cli-version", cliVersion] : [])];
+    const child = spawn(nodePath, args, {
       detached: true,
       stdio: "ignore"
     });
@@ -471,6 +485,50 @@ function parsePayload(input: string): Payload | null {
     return JSON.parse(input) as Payload;
   } catch {
     return null;
+  }
+}
+
+// Antigravity CLI 1.2.x answers the loopback probe with 401 and never gives the status line the
+// CSRF token it wants, so every probe fails. The rejection is recorded against the CLI version from
+// the payload: the HUD stops probing for that version, and an upgrade retries on its own. A payload
+// without a version, or one that fails this check, is never treated as rejected.
+function safeCliVersion(raw: unknown): string {
+  return typeof raw === "string" && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/.test(raw) ? raw : "";
+}
+
+function authRejectedPath(cachePath: string): string {
+  return cachePath === "" ? "" : `${cachePath}.auth-rejected.json`;
+}
+
+function authRejectedFor(cachePath: string, cliVersion: string): boolean {
+  const markerPath = authRejectedPath(cachePath);
+  if (markerPath === "" || cliVersion === "") {
+    return false;
+  }
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8")) as { cliVersion?: unknown };
+    return marker.cliVersion === cliVersion;
+  } catch {
+    return false;
+  }
+}
+
+function recordAuthRejection(cachePath: string, result: RefreshResult, cliVersion: string): void {
+  const markerPath = authRejectedPath(cachePath);
+  if (markerPath === "") {
+    return;
+  }
+  try {
+    if (result.ok) {
+      fs.rmSync(markerPath, { force: true });
+    } else if (result.authRejected && cliVersion !== "") {
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(markerPath, `${JSON.stringify({ cliVersion, rejectedAt: new Date().toISOString() })}\n`, {
+        encoding: "utf8", mode: 0o600
+      });
+    }
+  } catch {
+    // Losing the marker only costs another probe; it can never suppress one wrongly.
   }
 }
 

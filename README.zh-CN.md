@@ -326,6 +326,8 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 在 Antigravity CLI 1.2.11(可能也包括更早的 1.2.x)上,`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令,所以刷新无法成功。`quota refresh` 会报出这个原因,而不是笼统的查询失败。此时 HUD 只用状态栏 payload 里的官方配额渲染,一轮回答刚结束时可能短暂滞后。旧缓存不会用来覆盖它:同帧校正只信任五分钟内的缓存。
 
+为了不在注定失败的探测上持续花时间,被拒后会在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里记下状态栏 payload 中的 CLI `version`。只要 payload 报的还是这个版本,HUD 就跳过同帧探测和后台探测。CLI 升级到新版本后,下一次重绘会重新探测:再次被拒就记下新版本,成功则删除这个文件并恢复正常刷新。payload 里没有版本号时从不跳过探测。手动执行 `quota refresh` 始终会真正探测,删除这个文件也会强制重试。
+
 期望的(已脱敏)缓存结构:
 
 ```json

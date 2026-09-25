@@ -111,9 +111,14 @@ quota moving in the HUD during a long task. Lengthening its TTL trades away exac
 
 Since Antigravity CLI 1.2.x (verified on 1.2.11), the `agy` loopback server answers `GetUserStatus` with
 `401 missing CSRF token`, and the status-line command is not given that token, so every refresh fails.
-`quota refresh` reports that cause (`probeAuthRejected` in `src/quotaProbe.ts`). This is not a license
-to drop the probe either: it still serves older CLIs, and a documented token route would restore it.
-Do not scrape the token from the CLI binary, its memory or another process's environment.
+`quota refresh` reports that cause (`probeAuthRejected` in `src/quotaProbe.ts`), and the rejection is
+recorded against the payload's CLI `version` in `<cache>.auth-rejected.json` (`recordAuthRejection` in
+`src/main.ts`). This is the one sanctioned way to probe less: the rule above assumes a probe that can
+succeed, and one the CLI refuses outright only adds latency to the redraw at the end of every turn.
+Keep the pause keyed to the exact CLI version, so an update retries by itself; never make it
+permanent, time-based, or triggered by any failure other than an authentication rejection. The probe
+itself stays: it still serves older CLIs, and a documented token route would restore it. Do not
+scrape the token from the CLI binary, its memory or another process's environment.
 
 Make each probe cheaper rather than rarer. Since 0.1.9, a credential-free `.server.json` hint can
 reuse a loopback port after a targeted `ps` check verifies the same PID, start time and executable.

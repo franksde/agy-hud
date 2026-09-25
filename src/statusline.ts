@@ -18,6 +18,7 @@ export interface Payload {
   session_id?: string;
   conversation_id?: string;
   conversation_title?: string;
+  version?: string;
   transcript_path?: string;
   email?: string;
   model?: {

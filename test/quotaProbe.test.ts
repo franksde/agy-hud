@@ -405,6 +405,7 @@ test("reports an authentication rejection as its own cause", async () => {
   assert.match(result.message, /rejected .*unauthenticated/i);
   assert.match(result.message, /CSRF/);
   assert.match(result.message, /payload/);
+  assert.equal(result.authRejected, true);
 });
 
 test("a rejecting listener does not hide quota from another port", async () => {

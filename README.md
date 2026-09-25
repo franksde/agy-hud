@@ -329,6 +329,8 @@ Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to th
 
 On Antigravity CLI 1.2.11, and possibly earlier 1.2.x releases, the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token, so the refresh cannot succeed. `quota refresh` reports this cause instead of a generic query failure. The HUD then renders the official quota from the status-line payload alone, which can lag for a moment right after a turn settles. An old cache is not used to override it: the same-frame correction only trusts a cache younger than five minutes.
 
+So the HUD does not keep paying for a probe that cannot succeed, a rejection is recorded in `quota_cache.json.auth-rejected.json` (or `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`) together with the CLI `version` from the status-line payload. While the payload reports that same version, the HUD skips both the same-frame and the background probe. When the CLI updates to a new version, the next redraw probes again; a new rejection is recorded for the new version, and a success deletes the file and restores normal refreshes. A payload without a version never skips the probe. A manual `quota refresh` always probes, and deleting the file forces a retry.
+
 Expected sanitized cache shape:
 
 ```json

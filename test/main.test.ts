@@ -1072,3 +1072,129 @@ test("doctorDepsFromEnv reads the real environment without throwing", () => {
   assert.deepEqual(deps.listDir("/definitely/not/a/font/dir"), []);
   assert.equal(deps.readFile("/definitely/not/a/file.json"), null);
 });
+
+// Antigravity CLI 1.2.x rejects the loopback probe as unauthenticated. The rejection is recorded
+// per CLI version so the HUD stops paying for a probe that cannot succeed, and retries on upgrade.
+function versionedPayload(version: string | undefined, agentState = "idle"): string {
+  const payload = JSON.parse(statuslinePayload(agentState)) as Record<string, unknown>;
+  if (version !== undefined) payload.version = version;
+  return JSON.stringify(payload);
+}
+
+function authRejectedPath(fixture: HomeFixture): string {
+  return `${fixture.writePath}.auth-rejected.json`;
+}
+
+function writeAuthRejected(fixture: HomeFixture, cliVersion: string): void {
+  fs.mkdirSync(path.dirname(fixture.writePath), { recursive: true });
+  fs.writeFileSync(authRejectedPath(fixture), JSON.stringify({ cliVersion, rejectedAt: new Date().toISOString() }), "utf8");
+}
+
+async function runIdleTransition(fixture: HomeFixture, payload: string, result: { ok: boolean; message: string; authRejected?: boolean }): Promise<number> {
+  let calls = 0;
+  await runInHome(fixture, async () => {
+    await runCli(["statusline"], {
+      stdin: Readable.from([payload]),
+      stdout: () => {},
+      stderr: () => {},
+      refreshQuota: async () => {
+        calls += 1;
+        return result;
+      }
+    });
+  });
+  return calls;
+}
+
+test("a same-frame auth rejection is recorded against the CLI version", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  writeRefreshState(fixture.writePath, "working");
+
+  const calls = await runIdleTransition(fixture, versionedPayload("1.2.11"), { ok: false, message: "rejected", authRejected: true });
+
+  assert.equal(calls, 1);
+  const marker = JSON.parse(fs.readFileSync(authRejectedPath(fixture), "utf8"));
+  assert.equal(marker.cliVersion, "1.2.11");
+  assert.equal(Number.isNaN(Date.parse(marker.rejectedAt)), false);
+  assert.equal(fs.statSync(authRejectedPath(fixture)).mode & 0o077, 0, "the marker must stay private like the cache");
+});
+
+test("a recorded rejection for the running CLI version skips both same-frame and background probes", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 24 * 60 * 60 * 1000);
+  writeRefreshState(fixture.writePath, "working");
+  writeAuthRejected(fixture, "1.2.11");
+
+  const calls = await runIdleTransition(fixture, versionedPayload("1.2.11"), { ok: true, message: "refreshed" });
+
+  assert.equal(calls, 0, "the same-frame probe must be skipped");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(fs.existsSync(fixture.markerPath), false, "a stale cache must not spawn a background probe either");
+});
+
+test("a CLI upgrade retries the probe despite a rejection recorded for the old version", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  writeRefreshState(fixture.writePath, "working");
+  writeAuthRejected(fixture, "1.2.10");
+
+  assert.equal(await runIdleTransition(fixture, versionedPayload("1.2.11"), { ok: true, message: "refreshed" }), 1);
+});
+
+test("a payload without a CLI version is never treated as rejected", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  writeRefreshState(fixture.writePath, "working");
+  writeAuthRejected(fixture, "1.2.11");
+
+  assert.equal(await runIdleTransition(fixture, versionedPayload(undefined), { ok: true, message: "refreshed" }), 1);
+});
+
+test("the background probe is told which CLI version it is probing for", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 24 * 60 * 60 * 1000);
+
+  await runStatuslineInHome(fixture, versionedPayload("1.2.11"));
+
+  assert.equal(await waitForSpawn(fixture.markerPath), true);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.match(fs.readFileSync(fixture.markerPath, "utf8"), /quota refresh --cli-version 1\.2\.11/);
+});
+
+test("an unsafe CLI version is not passed to the background probe", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 24 * 60 * 60 * 1000);
+
+  await runStatuslineInHome(fixture, versionedPayload("1.2.11; rm -rf /"));
+
+  assert.equal(await waitForSpawn(fixture.markerPath), true);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.doesNotMatch(fs.readFileSync(fixture.markerPath, "utf8"), /--cli-version/);
+});
+
+test("quota refresh records a rejection only when told the CLI version, and a success clears it", async () => {
+  const fixture = homeFixture();
+  const run = (args: string[], result: { ok: boolean; message: string; authRejected?: boolean }) =>
+    runInHome(fixture, () => runCli(args, { stdout: () => {}, stderr: () => {}, refreshQuota: async () => result }));
+
+  assert.equal(await run(["quota", "refresh"], { ok: false, message: "rejected", authRejected: true }), 2);
+  assert.equal(fs.existsSync(authRejectedPath(fixture)), false, "without a version there is nothing to key the rejection on");
+
+  assert.equal(await run(["quota", "refresh", "--cli-version", "1.2.11"], { ok: false, message: "rejected", authRejected: true }), 2);
+  assert.equal(JSON.parse(fs.readFileSync(authRejectedPath(fixture), "utf8")).cliVersion, "1.2.11");
+
+  assert.equal(await run(["quota", "refresh"], { ok: true, message: "refreshed" }), 0);
+  assert.equal(fs.existsSync(authRejectedPath(fixture)), false, "a successful probe proves the rejection no longer holds");
+});
+
+test("a manual quota refresh always probes, even for a rejected CLI version", async () => {
+  const fixture = homeFixture();
+  writeAuthRejected(fixture, "1.2.11");
+  let calls = 0;
+  await runInHome(fixture, () => runCli(["quota", "refresh", "--cli-version", "1.2.11"], {
+    stdout: () => {}, stderr: () => {},
+    refreshQuota: async () => { calls += 1; return { ok: false, message: "rejected", authRejected: true }; }
+  }));
+  assert.equal(calls, 1);
+});

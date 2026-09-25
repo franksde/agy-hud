@@ -37,6 +37,8 @@ export interface RefreshResult {
   message: string;
   cachePath?: string;
   summary?: string;
+  // Every listener that answered refused the probe as unauthenticated; see probeAuthRejected.
+  authRejected?: boolean;
 }
 
 export function parseLanguageServerInfo(psOutput: string): LanguageServerInfo | null {
@@ -186,6 +188,7 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
   if (!sawResponse && sawAuthRejection) {
     return {
       ok: false,
+      authRejected: true,
       message: "The quota server rejected GetUserStatus as unauthenticated (missing CSRF token). " +
         "Newer Antigravity CLI releases require a token the status line does not receive, " +
         "so the HUD shows the quota from the status-line payload only."

@@ -414,6 +414,7 @@ async function refreshQuota(cachePath, runtime = defaultRuntime()) {
   if (!sawResponse && sawAuthRejection) {
     return {
       ok: false,
+      authRejected: true,
       message: "The quota server rejected GetUserStatus as unauthenticated (missing CSRF token). Newer Antigravity CLI releases require a token the status line does not receive, so the HUD shows the quota from the status-line payload only."
     };
   }
@@ -1641,22 +1642,29 @@ async function runCli(args, deps = {}) {
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
+    const cliVersion = safeCliVersion(payload?.version);
+    const probeRejected = authRejectedFor(cachePath, cliVersion);
     const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(
       cachePath,
       ok ? cache : null,
       payload,
-      deps.refreshQuota ?? refreshQuota
+      deps.refreshQuota ?? refreshQuota,
+      cliVersion,
+      probeRejected
     );
-    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed);
+    triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed, cliVersion, probeRejected);
     stdout(`${renderStatusline(raw, cfg, displayCache)}
 `);
     return 0;
   }
   if (command === "quota") {
     if (args[1] === "refresh") {
-      const lockPath = quotaCacheWritePath() + ".lock";
+      const cachePath = quotaCacheWritePath();
+      const lockPath = cachePath + ".lock";
+      const cliVersion = args[2] === "--cli-version" ? safeCliVersion(args[3]) : "";
       try {
-        const result = await (deps.refreshQuota ?? refreshQuota)(quotaCacheWritePath());
+        const result = await (deps.refreshQuota ?? refreshQuota)(cachePath);
+        recordAuthRejection(cachePath, result, cliVersion);
         stderr(`[quota_probe] ${result.message}
 `);
         if (result.ok && result.summary) {
@@ -1711,12 +1719,13 @@ function readStdin(stdin) {
     });
   });
 }
-async function refreshQuotaBeforeRenderIfNeeded(cachePath, cache, payload, refresh) {
-  if (!shouldRefreshBeforeRender(cachePath, payload, /* @__PURE__ */ new Date())) {
+async function refreshQuotaBeforeRenderIfNeeded(cachePath, cache, payload, refresh, cliVersion, probeRejected) {
+  if (probeRejected || !shouldRefreshBeforeRender(cachePath, payload, /* @__PURE__ */ new Date())) {
     return [cache, false];
   }
   try {
     const result = await refresh(cachePath);
+    recordAuthRejection(cachePath, result, cliVersion);
     if (!result.ok) {
       return [cache, false];
     }
@@ -1751,14 +1760,14 @@ function shouldRefreshBeforeRender(cachePath, payload, now) {
   }
   return true;
 }
-function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repairRefresh = false) {
+function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repairRefresh = false, cliVersion = "", probeRejected = false) {
   const now = /* @__PURE__ */ new Date();
   const statePath = refreshStatePath(cachePath);
   const prevState = loadRefreshStateWithFallback(quotaCacheReadCandidates());
   const activityRefresh = shouldTriggerActivityRefresh(cache, payload, prevState, now);
   const nextState = mergeStatuslineRefreshState(prevState, payload, activityRefresh, now);
   saveStatuslineRefreshState(statePath, nextState);
-  if (!quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh) {
+  if (probeRejected || !quotaCacheNeedsRefresh(cache, now) && !activityRefresh && !repairRefresh) {
     return;
   }
   const lockPath = cachePath + ".lock";
@@ -1772,7 +1781,8 @@ function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repa
     }
     import_node_fs5.default.writeFileSync(lockPath, (/* @__PURE__ */ new Date()).toISOString(), "utf8");
     const nodePath = process.argv[0];
-    const child = (0, import_node_child_process2.spawn)(nodePath, [__filename, "quota", "refresh"], {
+    const args = [__filename, "quota", "refresh", ...cliVersion ? ["--cli-version", cliVersion] : []];
+    const child = (0, import_node_child_process2.spawn)(nodePath, args, {
       detached: true,
       stdio: "ignore"
     });
@@ -1803,6 +1813,43 @@ function parsePayload(input) {
     return JSON.parse(input);
   } catch {
     return null;
+  }
+}
+function safeCliVersion(raw) {
+  return typeof raw === "string" && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$/.test(raw) ? raw : "";
+}
+function authRejectedPath(cachePath) {
+  return cachePath === "" ? "" : `${cachePath}.auth-rejected.json`;
+}
+function authRejectedFor(cachePath, cliVersion) {
+  const markerPath = authRejectedPath(cachePath);
+  if (markerPath === "" || cliVersion === "") {
+    return false;
+  }
+  try {
+    const marker = JSON.parse(import_node_fs5.default.readFileSync(markerPath, "utf8"));
+    return marker.cliVersion === cliVersion;
+  } catch {
+    return false;
+  }
+}
+function recordAuthRejection(cachePath, result, cliVersion) {
+  const markerPath = authRejectedPath(cachePath);
+  if (markerPath === "") {
+    return;
+  }
+  try {
+    if (result.ok) {
+      import_node_fs5.default.rmSync(markerPath, { force: true });
+    } else if (result.authRejected && cliVersion !== "") {
+      import_node_fs5.default.mkdirSync(import_node_path4.default.dirname(markerPath), { recursive: true, mode: 448 });
+      import_node_fs5.default.writeFileSync(markerPath, `${JSON.stringify({ cliVersion, rejectedAt: (/* @__PURE__ */ new Date()).toISOString() })}
+`, {
+        encoding: "utf8",
+        mode: 384
+      });
+    }
+  } catch {
   }
 }
 function refreshStatePath(cachePath) {
