@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Updated verified compatibility with Antigravity CLI through 1.2.14, covering install, status-line wiring, rendering and the `/usage` quota fallback. The loopback server still refuses `GetUserStatus` on 1.2.14. No code change.
+
 ## 0.1.11 — 2026-09-25
 
 - Added `show_title`, off by default, to show the `conversation_title` that Antigravity CLI 1.1.27+ passes to status-line scripts. The title is reduced to one plain line with control characters and bidi overrides removed, so it cannot break the layout or send sequences to the terminal, is clipped to 24 columns, and is the first segment dropped on a narrow terminal.

@@ -109,7 +109,7 @@ Also note that `statusline` only runs when the CLI redraws. There is no such thi
 during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
 quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
 
-From Antigravity CLI 1.2.2 on (verified on 1.2.11), the `agy` loopback server answers `GetUserStatus`
+From Antigravity CLI 1.2.2 on (verified on 1.2.11 and 1.2.14), the `agy` loopback server answers `GetUserStatus`
 with `401 missing CSRF token`, and nothing the CLI hands a plugin carries that token: not the
 status-line environment, not hook environments or hook stdin (both measured 2026-09-25). The refusal
 is recorded per CLI version in `<cache>.auth-rejected.json`, and refreshes for that version run the
