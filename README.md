@@ -11,7 +11,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 ## Requirements
 
 - Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.14, as is the `/usage` fallback; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
-- Node.js 18+ available on `PATH`
+- Node.js 18+. When `node` is not on the `PATH` the CLI starts the status line with, `hooks/status-line.sh` looks in the usual nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew locations
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
 
