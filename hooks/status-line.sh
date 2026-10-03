@@ -1,12 +1,20 @@
 #!/usr/bin/env sh
 set -eu
 
-# Fallback: add NVM default bin and common paths to PATH if node isn't found
+# If node is missing from PATH, check for an existing NVM node binary
 if ! command -v node >/dev/null 2>&1; then
-  # Checks standard NVM default alias symlink, or scans installed NVM versions
-  if [ -d "$HOME/.nvm/versions/node" ]; then
-    NODE_PATH=$(find "$HOME/.nvm/versions/node" -maxdepth 2 -type d -name "bin" 2>/dev/null | sort -V | tail -n 1)
-    [ -n "$NODE_PATH" ] && export PATH="$NODE_PATH:$PATH"
+  NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+  # 1. Check if the default alias resolves to a valid binary
+  if [ -x "$NVM_DIR/versions/node/$(cat "$NVM_DIR/alias/default" 2>/dev/null)/bin/node" ]; then
+    NODE_BIN_DIR="$NVM_DIR/versions/node/$(cat "$NVM_DIR/alias/default")/bin"
+    export PATH="$NODE_BIN_DIR:$PATH"
+  # 2. Otherwise, check for any installed node version in NVM directory
+  elif [ -d "$NVM_DIR/versions/node" ]; then
+    LATEST_NODE_BIN=$(find "$NVM_DIR/versions/node" -maxdepth 2 -type d -name "bin" 2>/dev/null | sort -V | tail -n 1)
+    if [ -n "$LATEST_NODE_BIN" ] && [ -x "$LATEST_NODE_BIN/node" ]; then
+      export PATH="$LATEST_NODE_BIN:$PATH"
+    fi
   fi
 fi
 
