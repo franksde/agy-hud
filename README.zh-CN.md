@@ -10,8 +10,8 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.2.14;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
-- Node.js 18+。如果 CLI 启动状态栏时的 `PATH` 里没有 `node`,`hooks/status-line.sh` 会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的常见位置查找
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.2.16;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
 
@@ -135,6 +135,41 @@ HUD 随后以纯文本渲染:`3.8 Flash High | Pro | dev`。
 
 在 SSH 会话里,字形是由你本地机器上的终端画的,所以在远端主机上装字体不可能改变它们。请在本地机器上走方案 B,或者在远端走方案 A。
 
+## 找不到 Node
+
+CLI 启动状态栏时可能不加载你的 shell profile。如果版本管理器只在 `.zshrc` 或 `.bashrc` 里初始化,那么即使终端里 `node` 可用,状态栏的 `PATH` 里也没有它。0.1.12 之前,这种情况下 HUD 不会出现。
+
+从 0.1.12 起,`PATH` 上没有 `node` 时,`hooks/status-line.sh` 会自己查找,顺序如下:
+
+| 位置 | 选取规则 |
+| --- | --- |
+| Volta | 已安装的最高版本 |
+| nvm | `default` alias,支持 `lts/*` 和 `22` 这类部分版本号;否则取已安装的最高版本 |
+| fnm | `default` alias;否则取已安装的最高版本 |
+| mise、asdf | 已安装的最高版本 |
+| nodenv | 全局 `version` 文件;否则取已安装的最高版本 |
+| n | `$N_PREFIX/bin`、`~/n/bin`、`~/.n/bin` |
+| Homebrew | `<prefix>/bin`,然后是 `node@22` 这类 keg-only formula |
+| 系统目录 | `~/.local/bin`、`/usr/bin`、`/snap/bin` |
+
+低于 Node 18 的安装会被跳过。找到的目录追加在 `PATH` 末尾,所以 `PATH` 原本能解析的命令不受影响。`node` 已经在 `PATH` 上时,以上逻辑完全不执行。
+
+对 Volta 和 mise,hook 直接使用已安装的 Node,不走管理器的 shim,因此取的是已安装的最高版本,不一定是你配置的默认版本。任何 Node 18+ 运行 HUD 的效果都一样。
+
+想确认 hook 在精简 `PATH` 下的行为,运行:
+
+```sh
+env -i HOME="$HOME" PATH=/usr/bin:/bin <插件根目录>/hooks/status-line.sh < /dev/null; echo "exit $?"
+```
+
+输出 `agy-hud` 和 `exit 0` 表示找到了 Node。输出 `agy-hud: node not found on PATH or in a known version-manager directory` 和 `exit 127` 表示没找到。这时把状态栏直接接到 Node 的完整路径上,就不需要查找了:
+
+```text
+/statusline /full/path/to/node <插件根目录>/dist/agy-hud.js statusline
+```
+
+在终端里运行 `command -v node` 可以得到这个路径。
+
 ## 卸载
 
 `/statusline` 命令会把配置独立保存在插件文件之外。卸载前请先清除这项配置,避免 CLI
@@ -215,6 +250,7 @@ agy plugin uninstall agy-hud
    按下面的方式处理:
 
    - `nodeOk: false` —— 运行时低于 18。如实汇报,HUD 跑不起来。
+   - `nodeOk` 描述的是运行 `doctor` 的那个 Node,也就是你 shell 的 `PATH` 上的那个。CLI 启动状态栏时的 `PATH` 可能更短。如果 `doctor` 通过而 HUD 仍不出现,请运行[找不到 Node](#找不到-node)里的检查命令。
    - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`,在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
    - `showIcons` —— 确认第 3 步最终落在了哪种模式。
    - `configInPluginDir: true` —— 当前生效的配置放在插件目录里,Antigravity CLI 1.1.28+ 下一次 `agy plugin install` 就会把它删掉。请告诉用户,征得同意后把它移到 `userConfigPath`:如果那里已有文件就合并进去,然后删除插件目录里的那份——否则它会一直压住新位置的配置,直到某次重装把它悄悄删掉。
@@ -324,7 +360,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 从 0.1.9 开始,配额刷新可复用配额缓存旁的 `quota_cache.json.server.json`(或 `<AGY_HUD_QUOTA_CACHE>.server.json`)。它只记录 PID、本地端口、进程身份(启动时间和可执行文件路径)及发现时间。每次复用前通过定向 `ps` 校验身份,省去全量进程扫描和 `lsof`;提示缓存五分钟后过期。请求失败或配额格式异常时,同一次刷新立即重新发现服务。需要 CSRF 的旧服务不写入提示缓存。配额刷新间隔、后台刷新和 working-to-idle 同帧校正均保持不变。
 
-从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11 和 1.2.14 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
+从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11、1.2.14 和 1.2.16 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
 
 在这样的 CLI 上,`quota refresh` 会改用官方只读命令 `agy -p /usage --output-format json`。它不启动 agent turn,不消耗 token 或配额,但会另起一个短暂的 `agy` 进程:约 7 秒,大部分时间在等 Google 的接口,CPU 约 1 秒,瞬时内存约 160 MB。HUD 从不在重绘时同步执行它,只在后台执行,并按下面的节奏:
 
@@ -377,6 +413,8 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 `agy-hud quota refresh` 只访问 loopback 上的本地 Antigravity 服务,或执行 `agy -p /usage`;不会打印 CSRF token、cookie、原始 probe 响应或 `/usage` 的错误文本。`/usage` 由 agy 用你自己的登录访问 Google,和 CLI 平时做的一样,agy-hud 本身不发任何网络请求。
 
 渲染器刻意不打印敏感的状态栏字段,包括邮箱、session ID、会话 ID、transcript 路径、token、CSRF 值、cookie、密钥以及完整的工作区路径。git 分支检测直接读取 `.git/HEAD`,不会调用 `git`。
+
+`PATH` 上没有 `node` 时,`hooks/status-line.sh` 会读取[找不到 Node](#找不到-node)所列版本管理器位置下的目录名,以及 nvm 的 alias 文件和 nodenv 的 `version` 文件,用来找到一个可启动的 Node。它不写入任何文件,除了这个 Node 之外也不启动任何程序。
 
 `agy-hud doctor` 只读取本地文件、只打印本地事实,不向任何地方发送数据,也不写入任何文件。由于它的输出正是你会贴进 bug 报告的内容,家目录下的路径会缩写成 `~/…`,从而去掉你的账户名。`doctor --json` 保留绝对路径,因为它面向的是同一台机器上的 agent——把这份输出贴到别处之前请先自己过一遍。
 

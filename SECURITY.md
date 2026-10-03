@@ -6,6 +6,8 @@ For sensitive reports, use a private disclosure channel provided by the project 
 
 `agy-hud statusline` renders only sanitized HUD fields from stdin plus local config/cache files. If the quota cache is stale or missing, it may start a detached background refresh that contacts only the local Antigravity loopback server. On Antigravity CLI 1.2.2+, which refuses that request, the refresh instead runs the official read-only `agy -p /usage` command: agy then talks to Google with your own sign-in, as it always does, and agy-hud itself makes no network request. Its output is parsed for quota buckets only, and its error text is never printed.
 
+`hooks/status-line.sh` starts that renderer with `node`. When `node` is not on `PATH`, the hook reads directory names under the usual version-manager locations in your home directory and the Homebrew prefix, plus nvm's alias files and nodenv's `version` file, to find one. It uses shell builtins only, writes nothing, and runs no program other than the Node it finds.
+
 ## Local Files
 
 `agy-hud` writes local files under its cache directory (`$XDG_CACHE_HOME/agy-hud/`, or `$HOME/.cache/agy-hud/`):

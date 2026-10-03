@@ -109,7 +109,7 @@ Also note that `statusline` only runs when the CLI redraws. There is no such thi
 during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
 quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
 
-From Antigravity CLI 1.2.2 on (verified on 1.2.11 and 1.2.14), the `agy` loopback server answers `GetUserStatus`
+From Antigravity CLI 1.2.2 on (verified on 1.2.11, 1.2.14 and 1.2.16), the `agy` loopback server answers `GetUserStatus`
 with `401 missing CSRF token`, and nothing the CLI hands a plugin carries that token: not the
 status-line environment, not hook environments or hook stdin (both measured 2026-09-25). The refusal
 is recorded per CLI version in `<cache>.auth-rejected.json`, and refreshes for that version run the
@@ -130,6 +130,29 @@ Make each probe cheaper rather than rarer. Since 0.1.9, a credential-free `.serv
 reuse a loopback port after a targeted `ps` check verifies the same PID, start time and executable.
 Hints expire after five minutes; failed or malformed replies fall back to `ps aux` / `lsof`
 discovery in the same refresh. Do not cache legacy CSRF tokens or relax this identity check.
+
+## The Hook Finds Node Itself
+
+Antigravity can start `hooks/status-line.sh` without the user's shell profile, so `node` from a
+version manager may be missing from `PATH`. Since 0.1.12 the hook looks for it (README, "Node Is Not
+Found"). `test/hook.test.ts` runs the hook under `sh` and `dash` against a sandboxed `HOME`. Rules
+that are easy to undo by accident:
+
+- **Shell builtins only, strict POSIX.** No `cat`, `find`, `sort`, `dirname`, no `local`, no
+  `sort -V`. A `PATH` without node is often missing other tools, and `sh` is dash on Debian and
+  Ubuntu. The tests give the hook an empty `PATH`, so an external command fails them.
+- **The lookup runs only when `command -v node` fails.** The status line is redrawn often; do not
+  add work to the normal path.
+- **Do not use Volta or mise shims.** A shim exists before any Node is installed and fails when no
+  version is configured, and that cannot be told without running it. Two review rounds landed on
+  this; the hook takes an installed Node instead.
+- **Append to `PATH`, never prepend.** Prepending could change which `git` or `agy` the bundle
+  resolves.
+- **Keep the Node 18 floor** (`MIN_NODE_MAJOR`). A stale nvm with Node 14 would otherwise win over a
+  usable install further down the list.
+- `AGY_HUD_NO_SYSTEM_NODE` exists for the tests: it skips the fixed system directories so the
+  not-found branch can be reached on a machine that has a system node. It is not a user setting
+  and stays out of the READMEs.
 
 ## Release And CI
 

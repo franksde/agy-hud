@@ -10,8 +10,8 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.14, as is the `/usage` fallback; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
-- Node.js 18+. When `node` is not on the `PATH` the CLI starts the status line with, `hooks/status-line.sh` looks in the usual nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew locations
+- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.16, as is the `/usage` fallback; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Node.js 18+. `node` does not have to be on the `PATH` the CLI starts the status line with: `hooks/status-line.sh` also looks where nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew install it (see [Node Is Not Found](#node-is-not-found))
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
 
@@ -135,6 +135,41 @@ Two limits on the font scan, which is why `doctor` reports it as a heuristic and
 
 Over SSH the glyphs are drawn by the terminal on your local machine, so a font installed on the remote host cannot change them. Take option B on the local machine, or option A on the remote one.
 
+## Node Is Not Found
+
+The CLI can start the status line without loading your shell profile. If a version manager is set up only in `.zshrc` or `.bashrc`, `node` is then missing from `PATH` even though it works in your terminal. Before 0.1.12 the HUD did not appear in that case.
+
+Since 0.1.12, `hooks/status-line.sh` looks for Node itself when `node` is not on `PATH`, in this order:
+
+| Where | What it picks |
+| --- | --- |
+| Volta | highest installed version |
+| nvm | the `default` alias, including `lts/*` and partial versions such as `22`; otherwise the highest installed version |
+| fnm | the `default` alias; otherwise the highest installed version |
+| mise, asdf | highest installed version |
+| nodenv | the global `version` file; otherwise the highest installed version |
+| n | `$N_PREFIX/bin`, `~/n/bin`, `~/.n/bin` |
+| Homebrew | `<prefix>/bin`, then keg-only formulas such as `node@22` |
+| System | `~/.local/bin`, `/usr/bin`, `/snap/bin` |
+
+Installs older than Node 18 are skipped. The directory it finds is added to the end of `PATH`, so nothing your `PATH` already resolves changes. When `node` is already on `PATH`, none of this runs.
+
+For Volta and mise the hook uses an installed Node directly and not the manager's shim, so it takes the highest installed version, which may not be the default you configured. Any Node 18+ runs the HUD the same way.
+
+To check what the hook does with a bare `PATH`:
+
+```sh
+env -i HOME="$HOME" PATH=/usr/bin:/bin <plugin-root>/hooks/status-line.sh < /dev/null; echo "exit $?"
+```
+
+`agy-hud` and `exit 0` mean it found Node. `agy-hud: node not found on PATH or in a known version-manager directory` and `exit 127` mean it did not. In that case wire the status line to your Node by its full path, which needs no lookup:
+
+```text
+/statusline /full/path/to/node <plugin-root>/dist/agy-hud.js statusline
+```
+
+`command -v node` in your terminal prints that path.
+
 ## Uninstalling
 
 The `/statusline` command stores its configuration separately from the plugin files. Clear that
@@ -216,6 +251,7 @@ For a genuinely new install:
    Act on it as follows:
 
    - `nodeOk: false` — the runtime is older than 18. Report it; the HUD will not run.
+   - `nodeOk` describes the Node that ran `doctor`, which is the one on your shell's `PATH`. The CLI may start the status line with a shorter `PATH`. If `doctor` passes and the HUD still does not appear, run the check in [Node Is Not Found](#node-is-not-found).
    - `statuslineWired: false` — the CLI is not running this plugin. Tell the user to run `/statusline <plugin-root>/hooks/status-line.sh`, because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired means something else owns their status line; say what it is rather than overwriting it.
    - `showIcons` — confirms which mode step 3 actually landed in.
    - `configInPluginDir: true` — the config in effect lives inside the plugin directory, and the next `agy plugin install` on Antigravity CLI 1.1.28+ deletes it. Tell the user, and with their agreement move it to `userConfigPath`: merge it into any file already there, then remove the plugin-directory copy, which would otherwise keep outranking it until the reinstall silently drops it.
@@ -327,7 +363,7 @@ The refresh command supports both known Antigravity local-server shapes: the cur
 
 Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to the quota cache (or `<AGY_HUD_QUOTA_CACHE>.server.json`). It holds only a PID, local port, process identity (start time and executable path), and discovery timestamp. Each reuse checks the process identity with a targeted `ps` call, avoiding a full process scan and `lsof`; hints expire after five minutes. Failure or malformed quota causes discovery in the same refresh. Legacy servers requiring CSRF are never cached in this hint. Quota refresh intervals, background refreshes and working-to-idle same-frame correction are unchanged.
 
-From Antigravity CLI 1.2.2 on (boundary measured by [CodexBar](https://github.com/steipete/CodexBar/pull/3685); verified here on 1.2.11 and 1.2.14), the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token. The status-line payload still carries the official quota, but it lags: during a turn it does not move at all, and a turn's usage booked after the CLI's end-of-turn fetch stays invisible until the next turn ends. Measured on 1.2.11, an idle session showed a 5h value 25 minutes out of date.
+From Antigravity CLI 1.2.2 on (boundary measured by [CodexBar](https://github.com/steipete/CodexBar/pull/3685); verified here on 1.2.11, 1.2.14 and 1.2.16), the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token. The status-line payload still carries the official quota, but it lags: during a turn it does not move at all, and a turn's usage booked after the CLI's end-of-turn fetch stays invisible until the next turn ends. Measured on 1.2.11, an idle session showed a 5h value 25 minutes out of date.
 
 On such a CLI, `quota refresh` falls back to the official read-only command `agy -p /usage --output-format json`. It starts no agent turn and spends no tokens or quota, but it does start a separate, short-lived `agy` process: about 7 s, most of it waiting on Google's API, about 1 s of CPU and a transient 160 MB. The HUD never runs it during a redraw, only in the background, and paces it:
 
@@ -380,6 +416,8 @@ If quota data is missing, the HUD omits the usage segment instead of showing a f
 `agy-hud quota refresh` contacts only the local Antigravity server on loopback, or runs `agy -p /usage`, and does not print CSRF tokens, cookies, raw probe responses, or `/usage` error text.
 
 The renderer intentionally avoids printing sensitive status-line fields, including email, session IDs, conversation IDs, transcript paths, tokens, CSRF values, cookies, keys, and full workspace paths. Git branch detection reads `.git/HEAD` directly and does not run `git`.
+
+When `node` is not on `PATH`, `hooks/status-line.sh` reads directory names under the version-manager locations listed in [Node Is Not Found](#node-is-not-found), plus nvm's alias files and nodenv's `version` file, to find a Node to start. It writes nothing and starts no program other than that Node.
 
 `agy-hud doctor` reads only local files and prints only local facts; it sends nothing anywhere and writes nothing. Because its output is what you would paste into a bug report, paths under your home directory are abbreviated to `~/…`, which drops your account name. `doctor --json` keeps them absolute, since it is meant for an agent acting on the same machine — review that output before pasting it anywhere.
 
