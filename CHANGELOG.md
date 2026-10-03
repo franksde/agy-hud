@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.12 — 2026-10-03
 
 - `hooks/status-line.sh` finds Node when it is not on the `PATH` the CLI starts the status line with, which happens when a version manager is set up only in a shell profile the CLI does not load (#15). It checks Volta, nvm (following the `default` alias through `lts/*` and partial versions such as `22`), fnm, mise, asdf, nodenv, n (`N_PREFIX`, `~/n`, `~/.n`), Homebrew including keg-only `node@N` formulas, and the common system directories, and appends the directory it finds to `PATH`. For Volta and mise it uses an installed Node directly instead of the manager's shim, because a shim only runs when a version is configured. The lookup runs only when the plain lookup fails, compares versions numerically, and skips installs older than Node 18. The hook no longer calls `dirname` or any other external command before starting Node. When nothing is found it says so and exits 127.
 - Updated verified compatibility with Antigravity CLI through 1.2.14, covering install, status-line wiring, rendering and the `/usage` quota fallback. The loopback server still refuses `GetUserStatus` on 1.2.14. No code change.
