@@ -11,7 +11,7 @@
 ## 运行要求
 
 - Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.2.14;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
-- `PATH` 中可用的 Node.js 18+
+- Node.js 18+。如果 CLI 启动状态栏时的 `PATH` 里没有 `node`,`hooks/status-line.sh` 会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的常见位置查找
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
 
