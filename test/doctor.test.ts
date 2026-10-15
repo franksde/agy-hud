@@ -474,3 +474,24 @@ test("reports an agy-hud entry without a path as unknown, not as missing", () =>
   assert.equal(report.installedPluginStatus, "unknown");
   assert.equal(report.installedPlugin, null);
 });
+
+test("treats $ in the home directory literally when expanding ~/", () => {
+  const home = "/home/u$1";
+  const root = `${home}/.gemini/config/plugins/agy-hud`;
+  const report = collectDoctorReport(deps({
+    homedir: home,
+    pluginList: () => JSON.stringify([{ name: "agy-hud", enabled: true, version: "0.1.12", path: root }]),
+    readFile: p => (p === `${home}/.gemini/antigravity-cli/settings.json`
+      ? JSON.stringify({ statusLine: { command: "~/.gemini/config/plugins/agy-hud/hooks/status-line.sh" } })
+      : null)
+  }));
+  assert.equal(report.statuslineRunsInstalled, true);
+});
+
+test("does not blame the listing command for an entry that only lacks a path", () => {
+  const text = formatDoctorReport(collectDoctorReport(deps({
+    pluginList: () => JSON.stringify([{ name: "agy-hud", enabled: true, version: "0.1.12" }])
+  })));
+  assert.match(text, /installed\s+unknown/);
+  assert.doesNotMatch(text, /could not read/);
+});
