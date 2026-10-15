@@ -1003,7 +1003,8 @@ test("doctor prints a human report and exits zero", async () => {
       env: { TERM_PROGRAM: "iTerm.app" },
       configPaths: [],
       readFile: () => null,
-      listDir: () => []
+      listDir: () => [],
+      pluginList: () => null
     }
   });
   assert.equal(code, 0);
@@ -1025,7 +1026,8 @@ test("doctor --json emits a machine-readable report for agents", async () => {
       env: { SSH_CONNECTION: "10.0.0.2 51000 10.0.0.9 22" },
       configPaths: ["/home/u/.config/agy-hud/config.json"],
       readFile: p => (p === "/home/u/.config/agy-hud/config.json" ? '{"show_icons": false}' : null),
-      listDir: () => []
+      listDir: () => [],
+      pluginList: () => null
     }
   });
   assert.equal(code, 0);
@@ -1071,6 +1073,24 @@ test("doctorDepsFromEnv reads the real environment without throwing", () => {
   }
   assert.deepEqual(deps.listDir("/definitely/not/a/font/dir"), []);
   assert.equal(deps.readFile("/definitely/not/a/file.json"), null);
+});
+
+test("doctorDepsFromEnv lists installed plugins through agy plugin list --json", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-plugin-list-"));
+  const fake = path.join(dir, "agy");
+  fs.writeFileSync(fake, '#!/bin/sh\nprintf \'[{"name":"agy-hud","version":"%s","path":"/p","enabled":true}]\' "$*"\n');
+  fs.chmodSync(fake, 0o755);
+  const oldPath = process.env.PATH;
+  try {
+    process.env.PATH = dir;
+    const listed = doctorDepsFromEnv().pluginList?.() ?? null;
+    assert.notEqual(listed, null);
+    assert.equal(JSON.parse(listed!)[0].version, "plugin list --json");
+    process.env.PATH = path.join(dir, "missing");
+    assert.equal(doctorDepsFromEnv().pluginList?.() ?? null, null);
+  } finally {
+    process.env.PATH = oldPath;
+  }
 });
 
 // Antigravity CLI 1.2.x rejects the loopback probe as unauthenticated. The rejection is recorded

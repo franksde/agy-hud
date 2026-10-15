@@ -1362,6 +1362,7 @@ function collectDoctorReport(deps) {
   const [nerdFont, nerdFontMatches] = scanNerdFont(deps);
   const [statuslineCommand, statuslineWired] = readStatuslineCommand(deps);
   const suggested = config.path ?? homeConfigPath(deps);
+  const [installedPluginStatus, installedPlugin] = readInstalledPlugin(deps);
   return {
     version: deps.version,
     homedir: deps.homedir,
@@ -1377,8 +1378,43 @@ function collectDoctorReport(deps) {
     terminal: detectTerminal(deps.env),
     remoteSession: Boolean(deps.env.SSH_CONNECTION || deps.env.SSH_TTY),
     nerdFont,
-    nerdFontMatches
+    nerdFontMatches,
+    installedPlugin,
+    installedPluginStatus,
+    statuslineRunsInstalled: runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir)
   };
+}
+function readInstalledPlugin(deps) {
+  const raw = deps.pluginList ? deps.pluginList() : null;
+  if (raw === null) {
+    return ["unknown", null];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return ["unknown", null];
+  }
+  if (!Array.isArray(parsed)) {
+    return ["unknown", null];
+  }
+  const entry = parsed.find((item) => item?.name === "agy-hud");
+  if (entry === void 0 || typeof entry.path !== "string" || entry.path === "") {
+    return ["not-installed", null];
+  }
+  return ["found", {
+    version: typeof entry.version === "string" ? entry.version : "",
+    path: entry.path,
+    enabled: entry.enabled !== false
+  }];
+}
+function runsInstalledCopy(command, plugin, homedir) {
+  if (command === null || plugin === null) {
+    return null;
+  }
+  const expanded = homedir === "" ? command : command.replace(/(^|\s)~\//g, `$1${homedir.replace(/\/$/, "")}/`);
+  const root = plugin.path.endsWith("/") ? plugin.path : `${plugin.path}/`;
+  return expanded.includes(root);
 }
 function detectTerminal(env) {
   if (env.TERM_PROGRAM) {
@@ -1502,6 +1538,11 @@ function formatDoctorReport(report) {
   row("plugin", report.version);
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
   row("statusline", report.statuslineCommand ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}` : "not configured \u2014 run /statusline <plugin-root>/hooks/status-line.sh in the CLI");
+  const pluginLines = installedLines(report, short);
+  row("installed", pluginLines[0]);
+  for (const extra of pluginLines.slice(1)) {
+    lines.push(" ".repeat(14) + extra);
+  }
   row("config", report.configPath ? `${short(report.configPath)} (show_icons: ${report.showIcons})` : `none found, using defaults (show_icons: ${report.showIcons})`);
   if (report.configInPluginDir) {
     lines.push(" ".repeat(14) + "inside the plugin directory, which `agy plugin install` replaces on");
@@ -1546,6 +1587,19 @@ function formatDoctorReport(report) {
     lines.push("  the local machine, or take option A here.");
   }
   return lines.join("\n") + "\n";
+}
+function installedLines(report, short) {
+  if (report.installedPluginStatus === "unknown" || report.installedPlugin === null) {
+    return report.installedPluginStatus === "not-installed" ? ["not installed as an Antigravity plugin"] : ["unknown (`agy plugin list --json` needs Antigravity CLI 1.3.4+)"];
+  }
+  const plugin = report.installedPlugin;
+  const out = [`${plugin.version || "?"}, ${plugin.enabled ? "enabled" : "disabled"} \u2014 ${short(plugin.path)}`];
+  if (report.statuslineRunsInstalled === false) {
+    out.push("the status line runs a different copy, so upgrades installed with");
+    out.push("`agy plugin install` will not reach it. Rewire it in the CLI:");
+    out.push(`/statusline ${short(plugin.path.replace(/\/$/, ""))}/hooks/status-line.sh`);
+  }
+  return out;
 }
 function dirname(filePath) {
   const cut = filePath.lastIndexOf("/");
@@ -1751,6 +1805,18 @@ function fcList() {
     return null;
   }
 }
+function agyPluginList() {
+  try {
+    return (0, import_node_child_process3.execFileSync)("agy", ["plugin", "list", "--json"], {
+      encoding: "utf8",
+      timeout: 5e3,
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+  } catch {
+    return null;
+  }
+}
 function doctorDepsFromEnv() {
   return {
     version,
@@ -1775,7 +1841,8 @@ function doctorDepsFromEnv() {
         return [];
       }
     },
-    fcList
+    fcList,
+    pluginList: agyPluginList
   };
 }
 async function runCli(args, deps = {}) {
