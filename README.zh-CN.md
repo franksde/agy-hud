@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.2.16;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.3.5;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
 - macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
@@ -76,6 +76,8 @@ command 只会是下面两种形态之一。无论哪种,**插件根目录都是
 node /Users/you/.gemini/config/plugins/agy-hud/dist/agy-hud.js statusline
                                        ^^^^^^^ 插件根目录
 ```
+
+Antigravity CLI 1.3.4 及以上,`doctor`(见[图标显示成方块](#图标显示成方块))会替你做这个比对:它的 `installed` 一行列出 `agy plugin install` 写入的那份,状态栏运行的不是这份时会给出提示。
 
 确认这个根目录当前是什么版本:
 
@@ -243,7 +245,10 @@ agy plugin uninstall agy-hud
      "terminal": "iTerm.app",
      "remoteSession": false,
      "nerdFont": "not-found",
-     "nerdFontMatches": []
+     "nerdFontMatches": [],
+     "installedPlugin": { "version": "0.1.12", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
+     "installedPluginStatus": "found",
+     "statuslineRunsInstalled": true
    }
    ```
 
@@ -254,6 +259,7 @@ agy plugin uninstall agy-hud
    - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`,在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
    - `showIcons` —— 确认第 3 步最终落在了哪种模式。
    - `configInPluginDir: true` —— 当前生效的配置放在插件目录里,Antigravity CLI 1.1.28+ 下一次 `agy plugin install` 就会把它删掉。请告诉用户,征得同意后把它移到 `userConfigPath`:如果那里已有文件就合并进去,然后删除插件目录里的那份——否则它会一直压住新位置的配置,直到某次重装把它悄悄删掉。
+   - `statuslineRunsInstalled: false` —— 状态栏运行的不是 `agy plugin install` 刚写入的那份,这次安装在屏幕上什么都没改变。请让用户运行 `/statusline <installedPlugin.path>/hooks/status-line.sh`。`null` 表示无法检查:Antigravity CLI 1.3.4 之前没有 `agy plugin list --json`,此时 `installedPluginStatus` 为 `unknown`。
    - `nerdFont` —— **只是提示,绝不是判据。** `not-found` 不代表图标坏了,因为 Ghostty、WezTerm、kitty 自带字形回退;`found` 也不代表图标能用,因为终端可能在用另一个字族。绝不要仅凭这个字段就去关图标,或去建议装字体。能定论的证据只有第 2 步用户的回答,或者 `doctor` 普通输出里的那行探针。
 
    不带 `--json` 的 `doctor` 会打印同一份报告外加图标探针,所以对于那些不在 CLI 终端里跟你对话的用户,它也可以充当第 2 步的检查手段。
@@ -280,7 +286,7 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 
 下文为了简洁,用 `agy-hud` 指代上面这条命令。如果你经常用,可以自己配一个 alias。
 
-`doctor` 自检一次安装:Node 版本、CLI 的状态栏接到了哪条命令、当前生效的配置文件与 `show_icons` 的解析结果、识别到的终端、是否 SSH 会话、启发式字体扫描,以及一行给你读的图标探针。它不改动磁盘上的任何东西。`--json` 输出同一份报告的机器可读 JSON,供刚完成安装、需要自查的 agent 使用;各字段该怎么处理见[面向 AI Agent](#面向-ai-agent)。
+`doctor` 自检一次安装:Node 版本、CLI 的状态栏接到了哪条命令、已安装的插件以及那条命令是否运行它(Antigravity CLI 1.3.4+)、当前生效的配置文件与 `show_icons` 的解析结果、识别到的终端、是否 SSH 会话、启发式字体扫描,以及一行给你读的图标探针。它不改动磁盘上的任何东西。`--json` 输出同一份报告的机器可读 JSON,供刚完成安装、需要自查的 agent 使用;各字段该怎么处理见[面向 AI Agent](#面向-ai-agent)。
 
 `statusline` 从标准输入以及本地配置/缓存文件渲染。当 `agent_state` 从 active work 回到 `idle` 时,它会先做一次本地 loopback `quota refresh` 再渲染,让同一次 redraw 就能反映本轮回答后的配额。缺失或过期缓存仍会用后台刷新作为兜底。`quota refresh` 会向正在运行的 Antigravity 本地服务请求 `GetUserStatus`,写入脱敏后的配额缓存;如果找不到可用的本地服务,会以非零状态退出。在 Antigravity CLI 1.2.2 及以后,本地服务会拒绝这个请求,此时跳过同帧刷新,`quota refresh` 改为执行官方的 `agy -p /usage`,且只在后台运行;见[配额缓存](#配额缓存)。
 
@@ -360,7 +366,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 从 0.1.9 开始,配额刷新可复用配额缓存旁的 `quota_cache.json.server.json`(或 `<AGY_HUD_QUOTA_CACHE>.server.json`)。它只记录 PID、本地端口、进程身份(启动时间和可执行文件路径)及发现时间。每次复用前通过定向 `ps` 校验身份,省去全量进程扫描和 `lsof`;提示缓存五分钟后过期。请求失败或配额格式异常时,同一次刷新立即重新发现服务。需要 CSRF 的旧服务不写入提示缓存。配额刷新间隔、后台刷新和 working-to-idle 同帧校正均保持不变。
 
-从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11、1.2.14 和 1.2.16 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
+从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11、1.2.14、1.2.16 和 1.3.5 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
 
 在这样的 CLI 上,`quota refresh` 会改用官方只读命令 `agy -p /usage --output-format json`。它不启动 agent turn,不消耗 token 或配额,但会另起一个短暂的 `agy` 进程:约 7 秒,大部分时间在等 Google 的接口,CPU 约 1 秒,瞬时内存约 160 MB。HUD 从不在重绘时同步执行它,只在后台执行,并按下面的节奏:
 
@@ -369,7 +375,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 | 一轮进行中,或刚结束 | 60 秒 |
 | CLI 空闲(例如打字引起的重绘) | 5 分钟 |
 
-所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,带这个标记的状态栏只渲染、不刷新。
+所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,`hooks/status-line.sh` 见到这个标记直接退出、不启动 Node,因为 print 模式不显示状态栏;直接用 bundle 接入时,带标记的状态栏只渲染、不刷新。
 
 被拒的情况记在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里,包括状态栏 payload 中的 CLI `version` 和失败退避。只要 payload 报的还是这个版本,刷新就直接走 `/usage`。CLI 升级后,下一次刷新会重新尝试 loopback,loopback 成功就删除这个文件。payload 里没有版本号时从不算被拒,手动执行 `quota refresh` 也总是先试 loopback。其他 loopback 失败(比如没有正在运行的服务)从不改走 `/usage`,所以旧版 CLI 的行为完全不变。
 
@@ -416,7 +422,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 `PATH` 上没有 `node` 时,`hooks/status-line.sh` 会读取[找不到 Node](#找不到-node)所列版本管理器位置下的目录名,以及 nvm 的 alias 文件和 nodenv 的 `version` 文件,用来找到一个可启动的 Node。它不写入任何文件,除了这个 Node 之外也不启动任何程序。
 
-`agy-hud doctor` 只读取本地文件、只打印本地事实,不向任何地方发送数据,也不写入任何文件。由于它的输出正是你会贴进 bug 报告的内容,家目录下的路径会缩写成 `~/…`,从而去掉你的账户名。`doctor --json` 保留绝对路径,因为它面向的是同一台机器上的 agent——把这份输出贴到别处之前请先自己过一遍。
+`agy-hud doctor` 只读取本地文件、只打印本地事实,不向任何地方发送数据,也不写入任何文件。它唯一运行的程序是 `agy plugin list --json`,即本地列出已安装插件。由于它的输出正是你会贴进 bug 报告的内容,家目录下的路径会缩写成 `~/…`,从而去掉你的账户名。`doctor --json` 保留绝对路径,因为它面向的是同一台机器上的 agent——把这份输出贴到别处之前请先自己过一遍。
 
 请勿在 issue 或 pull request 中放入原始 Antigravity probe 负载、日志、cookie、token、邮箱或本机路径。
 

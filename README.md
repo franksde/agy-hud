@@ -10,7 +10,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 ## Requirements
 
-- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.2.16, as is the `/usage` fallback; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
+- Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.3.5, as is the `/usage` fallback; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+. `node` does not have to be on the `PATH` the CLI starts the status line with: `hooks/status-line.sh` also looks where nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew install it (see [Node Is Not Found](#node-is-not-found))
 - macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
@@ -76,6 +76,8 @@ The command is one of these two shapes. Either way, **the plugin root is the `ag
 node /Users/you/.gemini/config/plugins/agy-hud/dist/agy-hud.js statusline
                                        ^^^^^^^ plugin root
 ```
+
+On Antigravity CLI 1.3.4 or newer, `doctor` (see [Icons Render As Boxes](#icons-render-as-boxes)) does this comparison for you: its `installed` row names the copy `agy plugin install` wrote, and warns when the status line runs a different one.
 
 Confirm the version that root is on:
 
@@ -244,7 +246,10 @@ For a genuinely new install:
      "terminal": "iTerm.app",
      "remoteSession": false,
      "nerdFont": "not-found",
-     "nerdFontMatches": []
+     "nerdFontMatches": [],
+     "installedPlugin": { "version": "0.1.12", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
+     "installedPluginStatus": "found",
+     "statuslineRunsInstalled": true
    }
    ```
 
@@ -255,6 +260,7 @@ For a genuinely new install:
    - `statuslineWired: false` — the CLI is not running this plugin. Tell the user to run `/statusline <plugin-root>/hooks/status-line.sh`, because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired means something else owns their status line; say what it is rather than overwriting it.
    - `showIcons` — confirms which mode step 3 actually landed in.
    - `configInPluginDir: true` — the config in effect lives inside the plugin directory, and the next `agy plugin install` on Antigravity CLI 1.1.28+ deletes it. Tell the user, and with their agreement move it to `userConfigPath`: merge it into any file already there, then remove the plugin-directory copy, which would otherwise keep outranking it until the reinstall silently drops it.
+   - `statuslineRunsInstalled: false` — the status line runs a copy other than the one `agy plugin install` just wrote, so the install changed nothing on screen. Tell the user to run `/statusline <installedPlugin.path>/hooks/status-line.sh`. `null` means it could not be checked: `installedPluginStatus` is `unknown` before Antigravity CLI 1.3.4, which added `agy plugin list --json`.
    - `nerdFont` — **a hint, never a decision.** `not-found` does not mean the icons are broken, because Ghostty, WezTerm and kitty ship their own glyph fallback. `found` does not mean they work either, because the terminal may draw with a different family. Never turn icons off, and never propose a font install, on the strength of this field alone. The user's answer in step 2, or the probe printed by plain `doctor`, is the only evidence that settles it.
 
    Plain `doctor`, without `--json`, prints the same report plus the icon probe, so it also serves as the step 2 check for a user who was reading you somewhere other than their CLI terminal.
@@ -281,7 +287,7 @@ node <plugin-root>/dist/agy-hud.js doctor --json
 
 The examples below use `agy-hud` as shorthand for that. If you use these often, alias it.
 
-`doctor` self-checks an install: Node version, which command the CLI has wired to its status line, which config file is in effect and what `show_icons` resolves to, the terminal it detects, whether this is an SSH session, a heuristic font scan, and an icon probe for you to read. It changes nothing on disk. `--json` prints the same report as machine-readable JSON, for an agent that needs to check an install it just performed; see [For AI Agents](#for-ai-agents) for how to act on each field.
+`doctor` self-checks an install: Node version, which command the CLI has wired to its status line, the installed plugin and whether that command runs it (Antigravity CLI 1.3.4+), which config file is in effect and what `show_icons` resolves to, the terminal it detects, whether this is an SSH session, a heuristic font scan, and an icon probe for you to read. It changes nothing on disk. `--json` prints the same report as machine-readable JSON, for an agent that needs to check an install it just performed; see [For AI Agents](#for-ai-agents) for how to act on each field.
 
 `statusline` renders from stdin plus local config/cache files. When `agent_state` settles from active work back to `idle`, it performs one local loopback `quota refresh` before rendering so the same redraw can reflect post-response quota. Missing or stale cache data can still refresh in the background as a fallback. `quota refresh` asks the running Antigravity local server for `GetUserStatus`, writes the sanitized quota cache, and exits non-zero if no local server can be reached. On Antigravity CLI 1.2.2+, where that server refuses the request, the same-frame refresh is skipped and `quota refresh` falls back to the official `agy -p /usage`, run only in the background; see [Quota Cache](#quota-cache).
 
@@ -363,7 +369,7 @@ The refresh command supports both known Antigravity local-server shapes: the cur
 
 Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to the quota cache (or `<AGY_HUD_QUOTA_CACHE>.server.json`). It holds only a PID, local port, process identity (start time and executable path), and discovery timestamp. Each reuse checks the process identity with a targeted `ps` call, avoiding a full process scan and `lsof`; hints expire after five minutes. Failure or malformed quota causes discovery in the same refresh. Legacy servers requiring CSRF are never cached in this hint. Quota refresh intervals, background refreshes and working-to-idle same-frame correction are unchanged.
 
-From Antigravity CLI 1.2.2 on (boundary measured by [CodexBar](https://github.com/steipete/CodexBar/pull/3685); verified here on 1.2.11, 1.2.14 and 1.2.16), the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token. The status-line payload still carries the official quota, but it lags: during a turn it does not move at all, and a turn's usage booked after the CLI's end-of-turn fetch stays invisible until the next turn ends. Measured on 1.2.11, an idle session showed a 5h value 25 minutes out of date.
+From Antigravity CLI 1.2.2 on (boundary measured by [CodexBar](https://github.com/steipete/CodexBar/pull/3685); verified here on 1.2.11, 1.2.14, 1.2.16 and 1.3.5), the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token. The status-line payload still carries the official quota, but it lags: during a turn it does not move at all, and a turn's usage booked after the CLI's end-of-turn fetch stays invisible until the next turn ends. Measured on 1.2.11, an idle session showed a 5h value 25 minutes out of date.
 
 On such a CLI, `quota refresh` falls back to the official read-only command `agy -p /usage --output-format json`. It starts no agent turn and spends no tokens or quota, but it does start a separate, short-lived `agy` process: about 7 s, most of it waiting on Google's API, about 1 s of CPU and a transient 160 MB. The HUD never runs it during a redraw, only in the background, and paces it:
 
@@ -372,7 +378,7 @@ On such a CLI, `quota refresh` falls back to the official read-only command `agy
 | A turn is running, or has just settled | 60 s |
 | The CLI sits idle (a redraw from typing, for example) | 5 minutes |
 
-Only one run happens at a time across every session: a lock next to the cache names its owner, only that owner runs `/usage` and removes the lock, and one older than 2 minutes is taken over. A failing run backs off for 60 s, doubling to 10 minutes. The `agy` it starts renders the status line too; agy-hud marks that child with `AGY_HUD_NESTED=1`, and a status line carrying the mark only renders.
+Only one run happens at a time across every session: a lock next to the cache names its owner, only that owner runs `/usage` and removes the lock, and one older than 2 minutes is taken over. A failing run backs off for 60 s, doubling to 10 minutes. The `agy` it starts renders the status line too; agy-hud marks that child with `AGY_HUD_NESTED=1`, and `hooks/status-line.sh` exits on the mark without starting Node, since print mode never shows a status line, and the bundle itself only renders when started directly with it.
 
 The refusal is recorded in `quota_cache.json.auth-rejected.json` (or `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`) together with the CLI `version` from the status-line payload, plus the backoff. While the payload reports that version, refreshes go straight to `/usage`. After a CLI update the next refresh tries loopback again, and a loopback success deletes the file. A payload without a version never counts as refused, and a manual `quota refresh` always tries loopback first. Any other loopback failure, such as no running server, never falls back to `/usage`, so older CLIs behave exactly as before.
 
@@ -419,7 +425,7 @@ The renderer intentionally avoids printing sensitive status-line fields, includi
 
 When `node` is not on `PATH`, `hooks/status-line.sh` reads directory names under the version-manager locations listed in [Node Is Not Found](#node-is-not-found), plus nvm's alias files and nodenv's `version` file, to find a Node to start. It writes nothing and starts no program other than that Node.
 
-`agy-hud doctor` reads only local files and prints only local facts; it sends nothing anywhere and writes nothing. Because its output is what you would paste into a bug report, paths under your home directory are abbreviated to `~/…`, which drops your account name. `doctor --json` keeps them absolute, since it is meant for an agent acting on the same machine — review that output before pasting it anywhere.
+`agy-hud doctor` reads only local files and prints only local facts; it sends nothing anywhere and writes nothing. The one program it runs is `agy plugin list --json`, a local listing of installed plugins. Because its output is what you would paste into a bug report, paths under your home directory are abbreviated to `~/…`, which drops your account name. `doctor --json` keeps them absolute, since it is meant for an agent acting on the same machine — review that output before pasting it anywhere.
 
 Do not put raw Antigravity probe payloads, logs, cookies, tokens, emails, or local machine paths in issues or pull requests.
 
