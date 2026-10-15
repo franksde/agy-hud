@@ -809,8 +809,11 @@ test("renders the default mode exactly as before", () => {
 
 test("title-cases an unknown but plain mode and never prints an unsafe one", () => {
   assert.match(strip(renderMode("review-only")), /\| Pro \| Review Only │/);
+  // Inherited object keys are plain unknown modes, never a lookup hit that prints "undefined".
+  assert.match(strip(renderMode("constructor")), /\| Pro \| Constructor │/);
+  assert.doesNotMatch(strip(renderMode("toString")), /undefined/);
   const before = renderMode(undefined);
-  for (const mode of ["\x1b]0;pwned\x07", "auto mode", "a".repeat(25), "-auto", 42, null, { x: 1 }]) {
+  for (const mode of ["__proto__", "\x1b]0;pwned\x07", "auto mode", "a".repeat(25), "-auto", 42, null, { x: 1 }]) {
     assert.equal(renderMode(mode), before, `cycle_mode ${JSON.stringify(mode)}`);
   }
 });

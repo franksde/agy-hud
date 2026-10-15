@@ -95,7 +95,9 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     nerdFontMatches,
     installedPlugin,
     installedPluginStatus,
-    statuslineRunsInstalled: runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir)
+    // A status line owned by another tool is not ours to rewire, so the comparison only applies when
+    // the command runs agy-hud at all.
+    statuslineRunsInstalled: statuslineWired ? runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir) : null
   };
 }
 
@@ -116,8 +118,12 @@ function readInstalledPlugin(deps: DoctorDeps): ["found" | "not-installed" | "un
   const entry = parsed.find(item => (item as { name?: unknown } | null)?.name === "agy-hud") as
     | { version?: unknown; path?: unknown; enabled?: unknown }
     | undefined;
-  if (entry === undefined || typeof entry.path !== "string" || entry.path === "") {
+  if (entry === undefined) {
     return ["not-installed", null];
+  }
+  // Listed but without a usable path: installed, but there is nothing to compare against.
+  if (typeof entry.path !== "string" || entry.path === "") {
+    return ["unknown", null];
   }
   return ["found", {
     version: typeof entry.version === "string" ? entry.version : "",
@@ -133,7 +139,10 @@ function runsInstalledCopy(command: string | null, plugin: InstalledPlugin | nul
   if (command === null || plugin === null) {
     return null;
   }
-  const expanded = homedir === "" ? command : command.replace(/(^|\s)~\//g, `$1${homedir.replace(/\/$/, "")}/`);
+  const home = homedir.replace(/\/$/, "");
+  const expanded = home === ""
+    ? command
+    : command.replace(/(^|\s)~\//g, `$1${home}/`).split("${HOME}/").join(`${home}/`).split("$HOME/").join(`${home}/`);
   const root = plugin.path.endsWith("/") ? plugin.path : `${plugin.path}/`;
   return expanded.includes(root);
 }
@@ -282,6 +291,11 @@ function abbreviate(text: string, homedir: string): string {
 export function formatDoctorReport(report: DoctorReport): string {
   const lines: string[] = [];
   const row = (label: string, value: string) => lines.push(`  ${label.padEnd(12)}${value}`);
+  // A row whose value needs more than one line; the rest align under the value column.
+  const rows = (label: string, values: string[]) => {
+    row(label, values[0]);
+    for (const extra of values.slice(1)) lines.push(" ".repeat(14) + extra);
+  };
   const short = (filePath: string) => abbreviate(filePath, report.homedir);
 
   lines.push("agy-hud doctor");
@@ -291,27 +305,23 @@ export function formatDoctorReport(report: DoctorReport): string {
   row("statusline", report.statuslineCommand
     ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`
     : "not configured — run /statusline <plugin-root>/hooks/status-line.sh in the CLI");
-  const pluginLines = installedLines(report, short);
-  row("installed", pluginLines[0]);
-  for (const extra of pluginLines.slice(1)) {
-    lines.push(" ".repeat(14) + extra);
-  }
-  row("config", report.configPath
-    ? `${short(report.configPath)} (show_icons: ${report.showIcons})`
-    : `none found, using defaults (show_icons: ${report.showIcons})`);
-  if (report.configInPluginDir) {
+  rows("installed", installedLines(report, short));
+  rows("config", [
+    report.configPath
+      ? `${short(report.configPath)} (show_icons: ${report.showIcons})`
+      : `none found, using defaults (show_icons: ${report.showIcons})`,
     // Still the file in effect, so option A below keeps naming it; this is about the next upgrade.
-    lines.push(" ".repeat(14) + "inside the plugin directory, which `agy plugin install` replaces on");
-    lines.push(" ".repeat(14) + "Antigravity CLI 1.1.28+, deleting this file. To keep your settings,");
-    lines.push(" ".repeat(14) + `move it to ${short(report.userConfigPath)}`);
-  }
+    ...(report.configInPluginDir
+      ? [
+          "inside the plugin directory, which `agy plugin install` replaces on",
+          "Antigravity CLI 1.1.28+, deleting this file. To keep your settings,",
+          `move it to ${short(report.userConfigPath)}`
+        ]
+      : [])
+  ]);
   row("terminal", report.terminal);
   row("session", report.remoteSession ? "remote (SSH)" : "local");
-  const fontLines = nerdFontLines(report);
-  row("nerd font", fontLines[0]);
-  for (const extra of fontLines.slice(1)) {
-    lines.push(" ".repeat(14) + extra);
-  }
+  rows("nerd font", nerdFontLines(report));
   lines.push("");
   lines.push("Icon probe. Each label below must be preceded by its own distinct glyph:");
   lines.push("");
@@ -349,7 +359,7 @@ function installedLines(report: DoctorReport, short: (filePath: string) => strin
   if (report.installedPluginStatus === "unknown" || report.installedPlugin === null) {
     return report.installedPluginStatus === "not-installed"
       ? ["not installed as an Antigravity plugin"]
-      : ["unknown (`agy plugin list --json` needs Antigravity CLI 1.3.4+)"];
+      : ["unknown: could not read `agy plugin list --json` (Antigravity CLI 1.3.4+)"];
   }
   const plugin = report.installedPlugin;
   const out = [`${plugin.version || "?"}, ${plugin.enabled ? "enabled" : "disabled"} — ${short(plugin.path)}`];

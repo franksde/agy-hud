@@ -279,11 +279,12 @@ function renderModelSegment(shortModel: string, rawPlan: string, config: Config)
   return `${withIcon(config, " ", "")}${plan}`;
 }
 
-const modeLabels: Record<string, [string, string]> = {
-  plan: ["Plan", colorCyan],
-  "accept-edits": ["Accept Edits", colorYellow],
-  auto: ["Auto", colorOrange]
-};
+// A Map, so a value such as "constructor" cannot resolve to an inherited property.
+const modeLabels = new Map<string, [string, string]>([
+  ["plan", ["Plan", colorCyan]],
+  ["accept-edits", ["Accept Edits", colorYellow]],
+  ["auto", ["Auto", colorOrange]]
+]);
 
 // The mode is a session setting like the model and plan, so it closes the model segment rather than
 // sitting beside the agent state, which changes every turn. It comes last in that segment, so its own
@@ -293,7 +294,7 @@ function renderMode(raw: unknown, config: Config): string {
   if (!config.showMode || typeof raw !== "string") return "";
   const mode = raw.toLowerCase();
   if (mode === "" || mode === "default") return "";
-  const known = modeLabels[mode];
+  const known = modeLabels.get(mode);
   if (known) return ` | ${colorize(known[0], known[1], config.color)}`;
   if (!/^[a-z][a-z0-9-]{0,23}$/.test(mode)) return "";
   const label = mode.split("-").filter(Boolean).map(title).join(" ");

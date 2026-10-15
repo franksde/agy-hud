@@ -24,9 +24,11 @@ CLIs print `Error: unknown list option "--json"` and also exit 0.
   **unknown**, never "not installed".
 - The first entry whose `name` is `agy-hud` is the installed plugin. A JSON array without one means
   **not installed**.
-- When the plugin is installed and `statusLine.command` is set, the command counts as running the
-  installed copy when it contains `<path>/`, after a leading `~/` in the command is expanded to the
-  home directory. No symlink resolution.
+- When the plugin is installed and `statusLine.command` runs agy-hud (`statuslineWired`), the command
+  counts as running the installed copy when it contains `<path>/`, after `~/`, `$HOME/` and
+  `${HOME}/` are expanded to the home directory. No symlink resolution. A status line owned by
+  another tool is not compared: it is not ours to rewire.
+- An `agy-hud` entry without a usable `path` is **unknown**.
 - `doctor --json` adds:
   - `installedPlugin`: `{ "version", "path", "enabled" }`, or `null`.
   - `installedPluginStatus`: `"found"`, `"not-installed"` or `"unknown"`.

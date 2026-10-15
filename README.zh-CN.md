@@ -259,7 +259,7 @@ agy plugin uninstall agy-hud
    - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`,在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
    - `showIcons` —— 确认第 3 步最终落在了哪种模式。
    - `configInPluginDir: true` —— 当前生效的配置放在插件目录里,Antigravity CLI 1.1.28+ 下一次 `agy plugin install` 就会把它删掉。请告诉用户,征得同意后把它移到 `userConfigPath`:如果那里已有文件就合并进去,然后删除插件目录里的那份——否则它会一直压住新位置的配置,直到某次重装把它悄悄删掉。
-   - `statuslineRunsInstalled: false` —— 状态栏运行的不是 `agy plugin install` 刚写入的那份,这次安装在屏幕上什么都没改变。请让用户运行 `/statusline <installedPlugin.path>/hooks/status-line.sh`。`null` 表示无法检查:Antigravity CLI 1.3.4 之前没有 `agy plugin list --json`,此时 `installedPluginStatus` 为 `unknown`。
+   - `statuslineRunsInstalled: false` —— 状态栏运行的不是 `agy plugin install` 刚写入的那份,这次安装在屏幕上什么都没改变。请让用户运行 `/statusline <installedPlugin.path>/hooks/status-line.sh`。`null` 表示没有可比对的对象:状态栏没有接到 agy-hud(见 `statuslineWired`),或者 `installedPluginStatus` 不是 `found`——Antigravity CLI 1.3.4 之前没有 `agy plugin list --json`,此时为 `unknown`。
    - `nerdFont` —— **只是提示,绝不是判据。** `not-found` 不代表图标坏了,因为 Ghostty、WezTerm、kitty 自带字形回退;`found` 也不代表图标能用,因为终端可能在用另一个字族。绝不要仅凭这个字段就去关图标,或去建议装字体。能定论的证据只有第 2 步用户的回答,或者 `doctor` 普通输出里的那行探针。
 
    不带 `--json` 的 `doctor` 会打印同一份报告外加图标探针,所以对于那些不在 CLI 终端里跟你对话的用户,它也可以充当第 2 步的检查手段。
@@ -377,7 +377,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 | 一轮进行中,或刚结束 | 60 秒 |
 | CLI 空闲(例如打字引起的重绘) | 5 分钟 |
 
-所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,`hooks/status-line.sh` 见到这个标记直接退出、不启动 Node,因为 print 模式不显示状态栏;直接用 bundle 接入时,带标记的状态栏只渲染、不刷新。
+所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,print 模式不显示状态栏,所以 `hooks/status-line.sh` 见到这个标记直接退出、不启动 Node;直接用 bundle 接入时,bundle 什么也不输出。
 
 被拒的情况记在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里,包括状态栏 payload 中的 CLI `version` 和失败退避。只要 payload 报的还是这个版本,刷新就直接走 `/usage`。CLI 升级后,下一次刷新会重新尝试 loopback,loopback 成功就删除这个文件。payload 里没有版本号时从不算被拒,手动执行 `quota refresh` 也总是先试 loopback。其他 loopback 失败(比如没有正在运行的服务)从不改走 `/usage`,所以旧版 CLI 的行为完全不变。
 

@@ -978,16 +978,16 @@ function renderModelSegment(shortModel, rawPlan, config) {
   }
   return `${withIcon(config, "\uEE9C ", "")}${plan}`;
 }
-var modeLabels = {
-  plan: ["Plan", colorCyan],
-  "accept-edits": ["Accept Edits", colorYellow],
-  auto: ["Auto", colorOrange]
-};
+var modeLabels = /* @__PURE__ */ new Map([
+  ["plan", ["Plan", colorCyan]],
+  ["accept-edits", ["Accept Edits", colorYellow]],
+  ["auto", ["Auto", colorOrange]]
+]);
 function renderMode(raw, config) {
   if (!config.showMode || typeof raw !== "string") return "";
   const mode = raw.toLowerCase();
   if (mode === "" || mode === "default") return "";
-  const known = modeLabels[mode];
+  const known = modeLabels.get(mode);
   if (known) return ` | ${colorize(known[0], known[1], config.color)}`;
   if (!/^[a-z][a-z0-9-]{0,23}$/.test(mode)) return "";
   const label = mode.split("-").filter(Boolean).map(title).join(" ");
@@ -1398,7 +1398,9 @@ function collectDoctorReport(deps) {
     nerdFontMatches,
     installedPlugin,
     installedPluginStatus,
-    statuslineRunsInstalled: runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir)
+    // A status line owned by another tool is not ours to rewire, so the comparison only applies when
+    // the command runs agy-hud at all.
+    statuslineRunsInstalled: statuslineWired ? runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir) : null
   };
 }
 function readInstalledPlugin(deps) {
@@ -1416,8 +1418,11 @@ function readInstalledPlugin(deps) {
     return ["unknown", null];
   }
   const entry = parsed.find((item) => item?.name === "agy-hud");
-  if (entry === void 0 || typeof entry.path !== "string" || entry.path === "") {
+  if (entry === void 0) {
     return ["not-installed", null];
+  }
+  if (typeof entry.path !== "string" || entry.path === "") {
+    return ["unknown", null];
   }
   return ["found", {
     version: typeof entry.version === "string" ? entry.version : "",
@@ -1429,7 +1434,8 @@ function runsInstalledCopy(command, plugin, homedir) {
   if (command === null || plugin === null) {
     return null;
   }
-  const expanded = homedir === "" ? command : command.replace(/(^|\s)~\//g, `$1${homedir.replace(/\/$/, "")}/`);
+  const home = homedir.replace(/\/$/, "");
+  const expanded = home === "" ? command : command.replace(/(^|\s)~\//g, `$1${home}/`).split("${HOME}/").join(`${home}/`).split("$HOME/").join(`${home}/`);
   const root = plugin.path.endsWith("/") ? plugin.path : `${plugin.path}/`;
   return expanded.includes(root);
 }
@@ -1549,30 +1555,29 @@ function abbreviate(text, homedir) {
 function formatDoctorReport(report) {
   const lines = [];
   const row = (label, value) => lines.push(`  ${label.padEnd(12)}${value}`);
+  const rows = (label, values) => {
+    row(label, values[0]);
+    for (const extra of values.slice(1)) lines.push(" ".repeat(14) + extra);
+  };
   const short = (filePath) => abbreviate(filePath, report.homedir);
   lines.push("agy-hud doctor");
   lines.push("");
   row("plugin", report.version);
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
   row("statusline", report.statuslineCommand ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}` : "not configured \u2014 run /statusline <plugin-root>/hooks/status-line.sh in the CLI");
-  const pluginLines = installedLines(report, short);
-  row("installed", pluginLines[0]);
-  for (const extra of pluginLines.slice(1)) {
-    lines.push(" ".repeat(14) + extra);
-  }
-  row("config", report.configPath ? `${short(report.configPath)} (show_icons: ${report.showIcons})` : `none found, using defaults (show_icons: ${report.showIcons})`);
-  if (report.configInPluginDir) {
-    lines.push(" ".repeat(14) + "inside the plugin directory, which `agy plugin install` replaces on");
-    lines.push(" ".repeat(14) + "Antigravity CLI 1.1.28+, deleting this file. To keep your settings,");
-    lines.push(" ".repeat(14) + `move it to ${short(report.userConfigPath)}`);
-  }
+  rows("installed", installedLines(report, short));
+  rows("config", [
+    report.configPath ? `${short(report.configPath)} (show_icons: ${report.showIcons})` : `none found, using defaults (show_icons: ${report.showIcons})`,
+    // Still the file in effect, so option A below keeps naming it; this is about the next upgrade.
+    ...report.configInPluginDir ? [
+      "inside the plugin directory, which `agy plugin install` replaces on",
+      "Antigravity CLI 1.1.28+, deleting this file. To keep your settings,",
+      `move it to ${short(report.userConfigPath)}`
+    ] : []
+  ]);
   row("terminal", report.terminal);
   row("session", report.remoteSession ? "remote (SSH)" : "local");
-  const fontLines = nerdFontLines(report);
-  row("nerd font", fontLines[0]);
-  for (const extra of fontLines.slice(1)) {
-    lines.push(" ".repeat(14) + extra);
-  }
+  rows("nerd font", nerdFontLines(report));
   lines.push("");
   lines.push("Icon probe. Each label below must be preceded by its own distinct glyph:");
   lines.push("");
@@ -1607,7 +1612,7 @@ function formatDoctorReport(report) {
 }
 function installedLines(report, short) {
   if (report.installedPluginStatus === "unknown" || report.installedPlugin === null) {
-    return report.installedPluginStatus === "not-installed" ? ["not installed as an Antigravity plugin"] : ["unknown (`agy plugin list --json` needs Antigravity CLI 1.3.4+)"];
+    return report.installedPluginStatus === "not-installed" ? ["not installed as an Antigravity plugin"] : ["unknown: could not read `agy plugin list --json` (Antigravity CLI 1.3.4+)"];
   }
   const plugin = report.installedPlugin;
   const out = [`${plugin.version || "?"}, ${plugin.enabled ? "enabled" : "disabled"} \u2014 ${short(plugin.path)}`];
@@ -1876,16 +1881,15 @@ async function runCli(args, deps = {}) {
     return 0;
   }
   if (command === "statusline") {
+    if (process.env.AGY_HUD_NESTED === "1") {
+      await readStdin(deps.stdin ?? process.stdin);
+      return 0;
+    }
     const cfg = loadFromPaths(configPaths());
     const raw = await readStdin(deps.stdin ?? process.stdin);
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
-    if (process.env.AGY_HUD_NESTED === "1") {
-      stdout(`${renderStatusline(raw, cfg, ok ? cache : null)}
-`);
-      return 0;
-    }
     const cliVersion = safeCliVersion(payload?.version);
     const probeRejected = authRejectedFor(cachePath, cliVersion);
     const [displayCache, refreshed] = await refreshQuotaBeforeRenderIfNeeded(

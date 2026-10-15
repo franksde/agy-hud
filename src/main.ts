@@ -298,17 +298,18 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
   }
 
   if (command === "statusline") {
+    if (process.env.AGY_HUD_NESTED === "1") {
+      // The status line of the agy that a /usage refresh started. Print mode never shows it, so it
+      // only drains its input, as hooks/status-line.sh does: it must not refresh again, and its
+      // print-mode agent states must not overwrite the interactive session's refresh state.
+      await readStdin(deps.stdin ?? process.stdin);
+      return 0;
+    }
     const cfg = loadFromPaths(configPaths());
     const raw = await readStdin(deps.stdin ?? process.stdin);
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
-    if (process.env.AGY_HUD_NESTED === "1") {
-      // The status line of the agy that a /usage refresh started. It must not refresh again, and its
-      // print-mode agent states must not overwrite the interactive session's refresh state.
-      stdout(`${renderStatusline(raw, cfg, ok ? cache : null)}\n`);
-      return 0;
-    }
     const cliVersion = safeCliVersion(payload?.version);
     // Loopback is refused for this CLI version, so quota comes from background /usage runs instead.
     const probeRejected = authRejectedFor(cachePath, cliVersion);
