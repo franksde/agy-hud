@@ -239,6 +239,21 @@ function fcList(): string | null {
   }
 }
 
+// Antigravity CLI 1.3.4+ lists installed plugins as JSON; older CLIs print an error, which doctor
+// reports as unknown. Only doctor runs this, never the status line.
+function agyPluginList(): string | null {
+  try {
+    return execFileSync("agy", ["plugin", "list", "--json"], {
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function doctorDepsFromEnv(): DoctorDeps {
   return {
     version,
@@ -263,7 +278,8 @@ export function doctorDepsFromEnv(): DoctorDeps {
         return [];
       }
     },
-    fcList
+    fcList,
+    pluginList: agyPluginList
   };
 }
 

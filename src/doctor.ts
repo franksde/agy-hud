@@ -29,6 +29,15 @@ export interface DoctorDeps {
   // Linux font discovery goes through fc-list. `null` means the command is unavailable, which is
   // reported as unknown rather than as a missing font.
   fcList?: () => string | null;
+  // stdout of `agy plugin list --json` (Antigravity CLI 1.3.4+). `null` means the command failed or
+  // is unavailable, which is reported as unknown rather than as a plugin that is not installed.
+  pluginList?: () => string | null;
+}
+
+export interface InstalledPlugin {
+  version: string;
+  path: string;
+  enabled: boolean;
 }
 
 export interface DoctorReport {
@@ -47,6 +56,11 @@ export interface DoctorReport {
   remoteSession: boolean;
   nerdFont: "found" | "not-found" | "unknown";
   nerdFontMatches: string[];
+  installedPlugin: InstalledPlugin | null;
+  installedPluginStatus: "found" | "not-installed" | "unknown";
+  // Whether statusLine.command runs the copy `agy plugin install` writes. `null` when either side is
+  // unknown or absent.
+  statuslineRunsInstalled: boolean | null;
 }
 
 // Nerd Font names show up as "JetBrainsMono Nerd Font", "HackNerdFont-Regular" and
@@ -62,6 +76,7 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
   // the plugin root outranks the home path. Suggesting the home path while such a file exists would
   // hand the user an edit the HUD never reads, so the fix always names the file already in effect.
   const suggested = config.path ?? homeConfigPath(deps);
+  const [installedPluginStatus, installedPlugin] = readInstalledPlugin(deps);
   return {
     version: deps.version,
     homedir: deps.homedir,
@@ -77,8 +92,50 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     terminal: detectTerminal(deps.env),
     remoteSession: Boolean(deps.env.SSH_CONNECTION || deps.env.SSH_TTY),
     nerdFont,
-    nerdFontMatches
+    nerdFontMatches,
+    installedPlugin,
+    installedPluginStatus,
+    statuslineRunsInstalled: runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir)
   };
+}
+
+function readInstalledPlugin(deps: DoctorDeps): ["found" | "not-installed" | "unknown", InstalledPlugin | null] {
+  const raw = deps.pluginList ? deps.pluginList() : null;
+  if (raw === null) {
+    return ["unknown", null];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return ["unknown", null];
+  }
+  if (!Array.isArray(parsed)) {
+    return ["unknown", null];
+  }
+  const entry = parsed.find(item => (item as { name?: unknown } | null)?.name === "agy-hud") as
+    | { version?: unknown; path?: unknown; enabled?: unknown }
+    | undefined;
+  if (entry === undefined || typeof entry.path !== "string" || entry.path === "") {
+    return ["not-installed", null];
+  }
+  return ["found", {
+    version: typeof entry.version === "string" ? entry.version : "",
+    path: entry.path,
+    enabled: entry.enabled !== false
+  }];
+}
+
+// The status line is wired through settings, not through the plugin, so `agy plugin install` only
+// reaches the HUD when the command runs a file under the installed root. The trailing separator keeps
+// a sibling such as `agy-hud-old` from passing as the installed copy.
+function runsInstalledCopy(command: string | null, plugin: InstalledPlugin | null, homedir: string): boolean | null {
+  if (command === null || plugin === null) {
+    return null;
+  }
+  const expanded = homedir === "" ? command : command.replace(/(^|\s)~\//g, `$1${homedir.replace(/\/$/, "")}/`);
+  const root = plugin.path.endsWith("/") ? plugin.path : `${plugin.path}/`;
+  return expanded.includes(root);
 }
 
 // TERM_PROGRAM is authoritative when present. kitty and Alacritty deliberately do not set it, so
@@ -234,6 +291,11 @@ export function formatDoctorReport(report: DoctorReport): string {
   row("statusline", report.statuslineCommand
     ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`
     : "not configured — run /statusline <plugin-root>/hooks/status-line.sh in the CLI");
+  const pluginLines = installedLines(report, short);
+  row("installed", pluginLines[0]);
+  for (const extra of pluginLines.slice(1)) {
+    lines.push(" ".repeat(14) + extra);
+  }
   row("config", report.configPath
     ? `${short(report.configPath)} (show_icons: ${report.showIcons})`
     : `none found, using defaults (show_icons: ${report.showIcons})`);
@@ -281,6 +343,22 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push("  the local machine, or take option A here.");
   }
   return lines.join("\n") + "\n";
+}
+
+function installedLines(report: DoctorReport, short: (filePath: string) => string): string[] {
+  if (report.installedPluginStatus === "unknown" || report.installedPlugin === null) {
+    return report.installedPluginStatus === "not-installed"
+      ? ["not installed as an Antigravity plugin"]
+      : ["unknown (`agy plugin list --json` needs Antigravity CLI 1.3.4+)"];
+  }
+  const plugin = report.installedPlugin;
+  const out = [`${plugin.version || "?"}, ${plugin.enabled ? "enabled" : "disabled"} — ${short(plugin.path)}`];
+  if (report.statuslineRunsInstalled === false) {
+    out.push("the status line runs a different copy, so upgrades installed with");
+    out.push("`agy plugin install` will not reach it. Rewire it in the CLI:");
+    out.push(`/statusline ${short(plugin.path.replace(/\/$/, ""))}/hooks/status-line.sh`);
+  }
+  return out;
 }
 
 function dirname(filePath: string): string {

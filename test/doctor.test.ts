@@ -344,3 +344,105 @@ test("prints no reinstall warning for a user-level config", () => {
   })));
   assert.doesNotMatch(text, /agy plugin install/);
 });
+
+// Antigravity CLI 1.3.4+ lists installed plugins with `agy plugin list --json`. The status line is
+// wired through settings, not through the plugin, so an install only reaches the HUD when
+// statusLine.command runs the installed copy.
+const installedRoot = "/home/u/.gemini/config/plugins/agy-hud";
+const pluginListJson = JSON.stringify([
+  { name: "other", enabled: true, version: "1.0.0", path: "/home/u/.gemini/config/plugins/other" },
+  { name: "agy-hud", enabled: true, version: "0.1.12", source: "antigravity", path: installedRoot }
+]);
+
+function wiredTo(command: string): (p: string) => string | null {
+  return p => (p === "/home/u/.gemini/antigravity-cli/settings.json" ? JSON.stringify({ statusLine: { command } }) : null);
+}
+
+test("reports the installed plugin from agy plugin list --json", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo(`${installedRoot}/hooks/status-line.sh`)
+  }));
+  assert.equal(report.installedPluginStatus, "found");
+  assert.deepEqual(report.installedPlugin, { version: "0.1.12", path: installedRoot, enabled: true });
+  assert.equal(report.statuslineRunsInstalled, true);
+});
+
+test("treats a command wired as node <bundle> statusline inside the installed root as the installed copy", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo(`node ${installedRoot}/dist/agy-hud.js statusline`)
+  }));
+  assert.equal(report.statuslineRunsInstalled, true);
+});
+
+test("expands a leading ~/ in the status-line command before comparing", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo("~/.gemini/config/plugins/agy-hud/hooks/status-line.sh")
+  }));
+  assert.equal(report.statuslineRunsInstalled, true);
+});
+
+test("flags a status line that runs a copy outside the installed plugin", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo("/home/u/.gemini/antigravity-cli/plugins/agy-hud/hooks/status-line.sh")
+  }));
+  assert.equal(report.statuslineRunsInstalled, false);
+  const text = formatDoctorReport(report);
+  assert.match(text, /will not reach/);
+  assert.ok(text.includes("/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh"), "must give the rewire command");
+});
+
+test("does not treat a sibling directory sharing the installed path as a prefix as the installed copy", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo(`${installedRoot}-old/hooks/status-line.sh`)
+  }));
+  assert.equal(report.statuslineRunsInstalled, false);
+});
+
+test("reports not-installed when the list holds no agy-hud entry", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => JSON.stringify([{ name: "other", enabled: true, version: "1", path: "/x" }]),
+    readFile: wiredTo(`${installedRoot}/hooks/status-line.sh`)
+  }));
+  assert.equal(report.installedPluginStatus, "not-installed");
+  assert.equal(report.installedPlugin, null);
+  assert.equal(report.statuslineRunsInstalled, null);
+});
+
+test("stays unknown when the list is unavailable or not JSON, as on a CLI before 1.3.4", () => {
+  for (const pluginList of [undefined, () => null, () => 'Error: unknown list option "--json"', () => "{}"]) {
+    const report = collectDoctorReport(deps({ pluginList, readFile: wiredTo(`${installedRoot}/hooks/status-line.sh`) }));
+    assert.equal(report.installedPluginStatus, "unknown");
+    assert.equal(report.installedPlugin, null);
+    assert.equal(report.statuslineRunsInstalled, null);
+  }
+});
+
+test("leaves statuslineRunsInstalled unknown when no status line is configured", () => {
+  const report = collectDoctorReport(deps({ pluginList: () => pluginListJson }));
+  assert.equal(report.installedPluginStatus, "found");
+  assert.equal(report.statuslineRunsInstalled, null);
+});
+
+test("prints the installed row with version, state and abbreviated path", () => {
+  const enabled = formatDoctorReport(collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo(`${installedRoot}/hooks/status-line.sh`)
+  })));
+  assert.match(enabled, /installed\s+0\.1\.12, enabled — ~\/\.gemini\/config\/plugins\/agy-hud/);
+  assert.doesNotMatch(enabled, /will not reach/);
+  const disabled = formatDoctorReport(collectDoctorReport(deps({
+    pluginList: () => pluginListJson.replace('"enabled":true,"version":"0.1.12"', '"enabled":false,"version":"0.1.12"'),
+    readFile: wiredTo(`${installedRoot}/hooks/status-line.sh`)
+  })));
+  assert.match(disabled, /installed\s+0\.1\.12, disabled/);
+  const unknown = formatDoctorReport(collectDoctorReport(deps()));
+  assert.match(unknown, /installed\s+unknown/);
+  assert.match(unknown, /1\.3\.4/);
+  const missing = formatDoctorReport(collectDoctorReport(deps({ pluginList: () => "[]" })));
+  assert.match(missing, /installed\s+not installed as an Antigravity plugin/);
+});
