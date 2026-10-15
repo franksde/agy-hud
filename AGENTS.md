@@ -109,7 +109,7 @@ Also note that `statusline` only runs when the CLI redraws. There is no such thi
 during genuine idleness; the background refresh fires while the CLI is *busy*, which is what keeps
 quota moving in the HUD during a long task. Lengthening its TTL trades away exactly that.
 
-From Antigravity CLI 1.2.2 on (verified on 1.2.11, 1.2.14 and 1.2.16), the `agy` loopback server answers `GetUserStatus`
+From Antigravity CLI 1.2.2 on (verified on 1.2.11, 1.2.14, 1.2.16 and 1.3.5), the `agy` loopback server answers `GetUserStatus`
 with `401 missing CSRF token`, and nothing the CLI hands a plugin carries that token: not the
 status-line environment, not hook environments or hook stdin (both measured 2026-09-25). The refusal
 is recorded per CLI version in `<cache>.auth-rejected.json`, and refreshes for that version run the
@@ -119,8 +119,10 @@ measurements behind it are in `docs/superpowers/specs/2026-09-25-usage-command-q
 - `/usage` spends no quota but starts a whole `agy` for about 7 s. Keep it out of every redraw path,
   keep the single global lock, and keep its floors (60 s active, 5 minutes idle) and backoff. They
   are the answer to "not too often, but never frozen through a long task".
-- The `agy` it starts renders the status line as well. `AGY_HUD_NESTED=1` is what stops that nested
-  render from refreshing again or overwriting the session's refresh state. Never drop it.
+- The `agy` it starts renders the status line as well, several times per run (nine measured on
+  1.3.5). `AGY_HUD_NESTED=1` is what stops that nested render from refreshing again or overwriting
+  the session's refresh state. `hooks/status-line.sh` exits on it before starting Node; the bundle
+  keeps its own check for a status line wired straight to `dist/agy-hud.js`. Never drop either.
 - Fall back to `/usage` only on an authentication refusal. Any other loopback failure must behave as
   before, so older CLIs are untouched.
 - Do not scrape the token from the CLI binary, its memory or another process's environment. CodexBar
