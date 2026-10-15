@@ -121,8 +121,8 @@ measurements behind it are in `docs/superpowers/specs/2026-09-25-usage-command-q
   are the answer to "not too often, but never frozen through a long task".
 - The `agy` it starts renders the status line as well, several times per run (nine measured on
   1.3.5). `AGY_HUD_NESTED=1` is what stops that nested render from refreshing again or overwriting
-  the session's refresh state. `hooks/status-line.sh` exits on it before starting Node; the bundle
-  keeps its own check for a status line wired straight to `dist/agy-hud.js`. Never drop either.
+  the session's refresh state. `hooks/status-line.sh` exits on it before starting Node, and the bundle
+  prints nothing on it for a status line wired straight to `dist/agy-hud.js`. Never drop either.
 - Fall back to `/usage` only on an authentication refusal. Any other loopback failure must behave as
   before, so older CLIs are untouched.
 - Do not scrape the token from the CLI binary, its memory or another process's environment. CodexBar

@@ -1089,7 +1089,8 @@ test("doctorDepsFromEnv lists installed plugins through agy plugin list --json",
     process.env.PATH = path.join(dir, "missing");
     assert.equal(doctorDepsFromEnv().pluginList?.() ?? null, null);
   } finally {
-    process.env.PATH = oldPath;
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
   }
 });
 
@@ -1277,9 +1278,10 @@ test("a failing /usage keeps the cache and backs off from 60 s, doubling to a 10
   assert.equal(marker.usageRetryAt, undefined);
 });
 
-// agy renders the status line in print mode too, so the /usage child renders agy-hud. That nested
-// render must never start a refresh or disturb the interactive session's state.
-test("a nested status line renders without refreshing or writing state", async () => {
+// agy renders the status line in print mode too, so the /usage child runs agy-hud several times per
+// run. Print mode never shows it, so the bundle prints nothing, like hooks/status-line.sh, and must
+// never start a refresh or disturb the interactive session's state.
+test("a nested status line prints nothing and neither refreshes nor writes state", async () => {
   const fixture = homeFixture();
   writeCache(fixture.writePath, 0.4, 24 * 60 * 60 * 1000);
   writeRefreshState(fixture.writePath, "working");
@@ -1297,7 +1299,7 @@ test("a nested status line renders without refreshing or writing state", async (
     delete process.env.AGY_HUD_NESTED;
   }
   assert.equal(calls, 0);
-  assert.match(strip(out), /Idle/);
+  assert.equal(out, "");
   await new Promise(resolve => setTimeout(resolve, 200));
   assert.equal(fs.existsSync(fixture.markerPath), false, "no background refresh");
   assert.equal(fs.readFileSync(`${fixture.writePath}.statusline.json`, "utf8"), stateBefore);

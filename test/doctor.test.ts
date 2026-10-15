@@ -446,3 +446,31 @@ test("prints the installed row with version, state and abbreviated path", () => 
   const missing = formatDoctorReport(collectDoctorReport(deps({ pluginList: () => "[]" })));
   assert.match(missing, /installed\s+not installed as an Antigravity plugin/);
 });
+
+test("does not offer to rewire a status line that another tool owns", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: wiredTo("/home/u/bin/my-prompt.sh")
+  }));
+  assert.equal(report.statuslineWired, false);
+  assert.equal(report.statuslineRunsInstalled, null);
+  assert.doesNotMatch(formatDoctorReport(report), /will not reach/);
+});
+
+test("expands $HOME and ${HOME} in the status-line command before comparing", () => {
+  for (const home of ["$HOME", "${HOME}"]) {
+    const report = collectDoctorReport(deps({
+      pluginList: () => pluginListJson,
+      readFile: wiredTo(`${home}/.gemini/config/plugins/agy-hud/hooks/status-line.sh`)
+    }));
+    assert.equal(report.statuslineRunsInstalled, true, home);
+  }
+});
+
+test("reports an agy-hud entry without a path as unknown, not as missing", () => {
+  const report = collectDoctorReport(deps({
+    pluginList: () => JSON.stringify([{ name: "agy-hud", enabled: true, version: "0.1.12" }])
+  }));
+  assert.equal(report.installedPluginStatus, "unknown");
+  assert.equal(report.installedPlugin, null);
+});
