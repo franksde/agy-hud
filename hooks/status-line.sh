@@ -4,6 +4,16 @@ set -eu
 # Everything up to the final exec uses shell builtins alone: the status line is
 # redrawn often, and the PATH this hook is started with can be short of more
 # than node.
+
+# The `agy -p /usage` that a quota refresh starts sets AGY_HUD_NESTED=1 and
+# redraws its own status line several times. Print mode never shows it, so
+# drain the payload and leave without starting node.
+if [ "${AGY_HUD_NESTED:-}" = 1 ]; then
+  # shellcheck disable=SC2034 # read only to consume stdin
+  while IFS= read -r PAYLOAD_LINE; do :; done
+  exit 0
+fi
+
 case $0 in
   */*) SCRIPT_DIR=${0%/*} ;;
   *) SCRIPT_DIR=. ;;
