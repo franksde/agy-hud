@@ -232,7 +232,7 @@ For a genuinely new install:
 
    ```json
    {
-     "version": "0.1.12",
+     "version": "0.1.13",
      "homedir": "/home/u",
      "nodeVersion": "v22.14.0",
      "nodeOk": true,
@@ -247,7 +247,7 @@ For a genuinely new install:
      "remoteSession": false,
      "nerdFont": "not-found",
      "nerdFontMatches": [],
-     "installedPlugin": { "version": "0.1.12", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
+     "installedPlugin": { "version": "0.1.13", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
      "installedPluginStatus": "found",
      "statuslineRunsInstalled": true
    }

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.13 — 2026-10-15
 
 - Added `show_mode`, on by default, to show the agent mode Antigravity CLI 1.3.5 cycles with `Shift+Tab` (`cycle_mode` in the payload): `Plan`, `Accept Edits` or `Auto`, closing the model segment before the directory. It sits with the model and plan because it is a session setting, away from the agent state that changes every turn. The default mode shows nothing, so the line is unchanged there. The CLI's prompt placeholder drops the mode as soon as you type, and a custom status line replaces the built-in one that keeps it, so without this agy-hud users had no persistent indicator. An unknown mode is shown only when it is a plain identifier.
 - `doctor` reports the installed plugin and whether the status line runs it. On Antigravity CLI 1.3.4+ it reads `agy plugin list --json` and prints an `installed` row with the version, enabled state and path. When `statusLine.command` runs agy-hud from somewhere else, which is how an upgrade silently fails to reach the HUD, it says so and gives the `/statusline` command that rewires it. `doctor --json` adds `installedPlugin`, `installedPluginStatus` and `statuslineRunsInstalled`. On older CLIs these read as unknown. Nothing else runs the command.
