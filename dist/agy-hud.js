@@ -1435,7 +1435,7 @@ function runsInstalledCopy(command, plugin, homedir) {
     return null;
   }
   const home = homedir.replace(/\/$/, "");
-  const expanded = home === "" ? command : command.replace(/(^|\s)~\//g, `$1${home}/`).split("${HOME}/").join(`${home}/`).split("$HOME/").join(`${home}/`);
+  const expanded = home === "" ? command : command.replace(/(^|\s)~\//g, (_, lead) => `${lead}${home}/`).split("${HOME}/").join(`${home}/`).split("$HOME/").join(`${home}/`);
   const root = plugin.path.endsWith("/") ? plugin.path : `${plugin.path}/`;
   return expanded.includes(root);
 }
@@ -1612,7 +1612,7 @@ function formatDoctorReport(report) {
 }
 function installedLines(report, short) {
   if (report.installedPluginStatus === "unknown" || report.installedPlugin === null) {
-    return report.installedPluginStatus === "not-installed" ? ["not installed as an Antigravity plugin"] : ["unknown: could not read `agy plugin list --json` (Antigravity CLI 1.3.4+)"];
+    return report.installedPluginStatus === "not-installed" ? ["not installed as an Antigravity plugin"] : ["unknown: `agy plugin list --json` (CLI 1.3.4+) gave no usable agy-hud entry"];
   }
   const plugin = report.installedPlugin;
   const out = [`${plugin.version || "?"}, ${plugin.enabled ? "enabled" : "disabled"} \u2014 ${short(plugin.path)}`];
