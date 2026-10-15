@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { defaultConfig, loadFromPaths } from "../src/config";
+import { defaultConfig, loadFromPaths, parseConfig } from "../src/config";
 
 test("default config matches open-source defaults", () => {
   const got = defaultConfig();
@@ -71,4 +71,9 @@ test("show_title is off by default and honored from config JSON", () => {
   const configPath = path.join(dir, "config.json");
   fs.writeFileSync(configPath, JSON.stringify({ show_title: true }));
   assert.equal(loadFromPaths([configPath]).showTitle, true);
+});
+
+test("show_mode is on by default and honored from config JSON", () => {
+  assert.equal(defaultConfig().showMode, true);
+  assert.equal(parseConfig(JSON.stringify({ show_mode: false })).showMode, false);
 });
