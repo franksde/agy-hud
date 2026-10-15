@@ -181,6 +181,7 @@ function defaultConfig() {
     showAgentState: true,
     showCost: true,
     showTitle: false,
+    showMode: true,
     showIcons: true,
     contextValue: "percent",
     usageValue: "remaining",
@@ -216,6 +217,7 @@ function merge(base, patch) {
   if (typeof patch.show_agent_state === "boolean") base.showAgentState = patch.show_agent_state;
   if (typeof patch.show_cost === "boolean") base.showCost = patch.show_cost;
   if (typeof patch.show_title === "boolean") base.showTitle = patch.show_title;
+  if (typeof patch.show_mode === "boolean") base.showMode = patch.show_mode;
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
@@ -836,7 +838,7 @@ function render(payload, opts) {
   const config = opts.config;
   const width = (payload.terminal_width ?? 0) <= 0 ? 80 : payload.terminal_width;
   const modelDisplay = payload.model?.display_name || payload.model?.id || "Gemini";
-  const modelSegment = renderModelSegment(shortModelName(modelDisplay), payload.plan_tier ?? "", config);
+  const modelSegment = renderModelSegment(shortModelName(modelDisplay), payload.plan_tier ?? "", config) + renderMode(payload.cycle_mode, config);
   const ctxPct = contextPercent(payload.context_window);
   const stateLabel = state(payload.agent_state ?? "");
   const quota = quotaInfo(opts.quota, modelDisplay, payload.quota, opts.now ?? /* @__PURE__ */ new Date());
@@ -975,6 +977,21 @@ function renderModelSegment(shortModel, rawPlan, config) {
     return `${withIcon(config, "\uEE9C ", "")}${renderPlan(plan, config)} Tier`;
   }
   return `${withIcon(config, "\uEE9C ", "")}${plan}`;
+}
+var modeLabels = {
+  plan: ["Plan", colorCyan],
+  "accept-edits": ["Accept Edits", colorYellow],
+  auto: ["Auto", colorOrange]
+};
+function renderMode(raw, config) {
+  if (!config.showMode || typeof raw !== "string") return "";
+  const mode = raw.toLowerCase();
+  if (mode === "" || mode === "default") return "";
+  const known = modeLabels[mode];
+  if (known) return ` | ${colorize(known[0], known[1], config.color)}`;
+  if (!/^[a-z][a-z0-9-]{0,23}$/.test(mode)) return "";
+  const label = mode.split("-").filter(Boolean).map(title).join(" ");
+  return ` | ${colorize(label, colorYellow, config.color)}`;
 }
 function renderPlan(plan, config) {
   if (plan === "Pro") {

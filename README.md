@@ -317,6 +317,7 @@ Default config:
   "show_agent_state": true,
   "show_cost": true,
   "show_title": false,
+  "show_mode": true,
   "show_icons": true,
   "context_value": "percent",
   "usage_value": "remaining"
@@ -330,6 +331,7 @@ Display options:
 
 - `show_agent_state`: shows stdin `agent_state` such as `Idle`, `Thinking`, or `Auth`.
 - `show_cost`: shows the session cost supplied as `cost.total_usd` by Antigravity CLI 1.1.21+, at the end of the top line (or the single line). `estimated: true` adds `~`, for example `~$0.02`. Zero displays as `$0.00`, positive amounts below $0.001 as `<$0.001`; missing, negative or non-finite values are omitted. The HUD does not separately add `subagent_usd` or calculate subscription charges; this is not an invoice or a promise of actual billing.
+- `show_mode`: shows the agent mode chosen with `Shift+Tab` (Antigravity CLI 1.3.5+) at the end of the model segment, before the directory: `Plan`, `Accept Edits` or `Auto`, in cyan, yellow and orange respectively. The default mode shows nothing. A custom status line replaces the CLI's built-in one, which is otherwise the only place the mode stays visible once you start typing. On by default.
 - `show_title`: shows the conversation title supplied as `conversation_title` by Antigravity CLI 1.1.27+, between the branch and the agent state (before the state on the single line). Off by default. It is reduced to one plain line with control characters removed, clipped to 24 columns, and is the first segment dropped when the line does not fit, before cost.
 - `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes. Run `doctor` to see the icon probe and the exact fix; [Icons Render As Boxes](#icons-render-as-boxes) covers the whole question.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.

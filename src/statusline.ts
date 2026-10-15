@@ -35,6 +35,8 @@ export interface Payload {
   };
   quota?: Record<string, OfficialQuotaBucket>;
   agent_state?: string;
+  // The Shift+Tab agent mode, Antigravity CLI 1.3.5+. Absent in the default mode.
+  cycle_mode?: unknown;
   plan_tier?: string;
   terminal_width?: number;
   vcs?: {
@@ -131,7 +133,7 @@ export function render(payload: Payload, opts: RenderOptions): string {
   const config = opts.config;
   const width = (payload.terminal_width ?? 0) <= 0 ? 80 : payload.terminal_width!;
   const modelDisplay = payload.model?.display_name || payload.model?.id || "Gemini";
-  const modelSegment = renderModelSegment(shortModelName(modelDisplay), payload.plan_tier ?? "", config);
+  const modelSegment = renderModelSegment(shortModelName(modelDisplay), payload.plan_tier ?? "", config) + renderMode(payload.cycle_mode, config);
   const ctxPct = contextPercent(payload.context_window);
   const stateLabel = state(payload.agent_state ?? "");
   const quota = quotaInfo(opts.quota, modelDisplay, payload.quota, opts.now ?? new Date());
@@ -275,6 +277,27 @@ function renderModelSegment(shortModel: string, rawPlan: string, config: Config)
     return `${withIcon(config, " ", "")}${renderPlan(plan, config)} Tier`;
   }
   return `${withIcon(config, " ", "")}${plan}`;
+}
+
+const modeLabels: Record<string, [string, string]> = {
+  plan: ["Plan", colorCyan],
+  "accept-edits": ["Accept Edits", colorYellow],
+  auto: ["Auto", colorOrange]
+};
+
+// The mode is a session setting like the model and plan, so it closes the model segment rather than
+// sitting beside the agent state, which changes every turn. It comes last in that segment, so its own
+// colour ends where the segment's blue would have ended anyway. An unknown mode still shows, but only
+// when it is a plain identifier: the value comes from the CLI and is never printed raw.
+function renderMode(raw: unknown, config: Config): string {
+  if (!config.showMode || typeof raw !== "string") return "";
+  const mode = raw.toLowerCase();
+  if (mode === "" || mode === "default") return "";
+  const known = modeLabels[mode];
+  if (known) return ` | ${colorize(known[0], known[1], config.color)}`;
+  if (!/^[a-z][a-z0-9-]{0,23}$/.test(mode)) return "";
+  const label = mode.split("-").filter(Boolean).map(title).join(" ");
+  return ` | ${colorize(label, colorYellow, config.color)}`;
 }
 
 function renderPlan(plan: string, config: Config): string {

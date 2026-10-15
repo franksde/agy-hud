@@ -759,14 +759,14 @@ test("on equal remainders the cached reading wins, so the countdown is live", ()
 });
 
 // A real Antigravity CLI 1.3.5 payload (sanitized). 1.3.x sends model.id equal to display_name rather
-// than a slug, and adds model.effort, cycle_mode, sandbox and exceeds_200k_tokens. None of them may
-// disturb the HUD.
+// than a slug, and adds model.effort, cycle_mode, sandbox and exceeds_200k_tokens. Only cycle_mode
+// shows; the rest must not disturb the HUD.
 test("renders a real Antigravity CLI 1.3.5 payload", () => {
   const payload = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "testdata", "statusline_payload_1.3.5.json"), "utf8"));
   const out = strip(render(payload, { config: defaultConfig(), quota: null, gitBranch: "main", now: new Date("2026-10-15T08:38:00Z") }));
   const [line1, line2] = out.split("\n");
   assert.match(line1, /3\.8 Flash High/);
-  assert.match(line1, /Pro/);
+  assert.match(line1, /Pro \| Auto/);
   assert.match(line1, /Idle/);
   assert.match(line2, /^Context .* 0%/);
   // usage_value defaults to "remaining".
@@ -774,4 +774,60 @@ test("renders a real Antigravity CLI 1.3.5 payload", () => {
   for (const line of out.split("\n")) {
     assert.ok(visibleLen(line) <= 140);
   }
+});
+
+// Antigravity CLI 1.3.5 sends the Shift+Tab agent mode as cycle_mode and omits it in the default mode.
+// It is a session setting, so it rides with the model and plan, before the directory.
+function renderMode(mode: unknown, overrides: Partial<Config> = {}, extra: Record<string, unknown> = {}): string {
+  const payload = { ...fixturePayload(), ...extra } as Payload & Record<string, unknown>;
+  if (mode !== undefined) payload.cycle_mode = mode;
+  return render(payload, {
+    config: { ...defaultConfig(), showIcons: false, ...overrides },
+    quota: null,
+    gitBranch: "main",
+    now: new Date("2026-05-19T12:00:00Z")
+  });
+}
+
+test("shows the agent mode after the plan tier and before the directory", () => {
+  const line1 = strip(renderMode("auto")).split("\n")[0];
+  assert.match(line1, /^3\.5 Flash Med \| Pro \| Auto │ agy-hud │ main │ /);
+});
+
+test("labels each known agent mode", () => {
+  assert.match(strip(renderMode("plan")), /\| Pro \| Plan │/);
+  assert.match(strip(renderMode("accept-edits")), /\| Pro \| Accept Edits │/);
+  assert.match(strip(renderMode("auto")), /\| Pro \| Auto │/);
+});
+
+test("renders the default mode exactly as before", () => {
+  const before = renderMode(undefined);
+  for (const mode of ["", "default", "DEFAULT"]) {
+    assert.equal(renderMode(mode), before, `cycle_mode ${JSON.stringify(mode)}`);
+  }
+});
+
+test("title-cases an unknown but plain mode and never prints an unsafe one", () => {
+  assert.match(strip(renderMode("review-only")), /\| Pro \| Review Only │/);
+  const before = renderMode(undefined);
+  for (const mode of ["\x1b]0;pwned\x07", "auto mode", "a".repeat(25), "-auto", 42, null, { x: 1 }]) {
+    assert.equal(renderMode(mode), before, `cycle_mode ${JSON.stringify(mode)}`);
+  }
+});
+
+test("show_mode false hides the agent mode", () => {
+  assert.equal(renderMode("auto", { showMode: false }), renderMode(undefined));
+});
+
+test("colors the agent mode by how much it approves on its own", () => {
+  assert.ok(renderMode("auto", { color: true }).includes("\x1b[38;5;208mAuto\x1b[0m"));
+  assert.ok(renderMode("accept-edits", { color: true }).includes("\x1b[33mAccept Edits\x1b[0m"));
+  assert.ok(renderMode("plan", { color: true }).includes("\x1b[36mPlan\x1b[0m"));
+  assert.ok(!renderMode("auto", { color: false }).includes("\x1b["));
+});
+
+test("keeps the agent mode in the single-line layout and on a narrow terminal", () => {
+  assert.match(strip(renderMode("auto", { multiline: false })), /^3\.5 Flash Med \| Pro \| Auto /);
+  const narrow = strip(renderMode("auto", {}, { terminal_width: 30 })).split("\n")[0];
+  assert.match(narrow, /Auto/);
 });
