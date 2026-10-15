@@ -757,3 +757,21 @@ test("on equal remainders the cached reading wins, so the countdown is live", ()
   );
   assert.match(line, /85% left ↻ Reset 4h 29m/);
 });
+
+// A real Antigravity CLI 1.3.5 payload (sanitized). 1.3.x sends model.id equal to display_name rather
+// than a slug, and adds model.effort, cycle_mode, sandbox and exceeds_200k_tokens. None of them may
+// disturb the HUD.
+test("renders a real Antigravity CLI 1.3.5 payload", () => {
+  const payload = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "testdata", "statusline_payload_1.3.5.json"), "utf8"));
+  const out = strip(render(payload, { config: defaultConfig(), quota: null, gitBranch: "main", now: new Date("2026-10-15T08:38:00Z") }));
+  const [line1, line2] = out.split("\n");
+  assert.match(line1, /3\.8 Flash High/);
+  assert.match(line1, /Pro/);
+  assert.match(line1, /Idle/);
+  assert.match(line2, /^Context .* 0%/);
+  // usage_value defaults to "remaining".
+  assert.match(line2, /Usage .* 100% \|.* 98% \(↻ 5d 21h\)/);
+  for (const line of out.split("\n")) {
+    assert.ok(visibleLen(line) <= 140);
+  }
+});
