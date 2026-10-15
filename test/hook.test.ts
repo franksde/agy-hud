@@ -353,6 +353,21 @@ for (const shell of shells) {
     assert.equal(result.stdout, "");
   });
 
+  // The `agy -p /usage` a quota refresh starts redraws its own status line several times, and print
+  // mode never shows it, so the hook drains the payload and leaves before looking for node at all.
+  test(`status-line.sh (${path.basename(shell)}) exits without starting node for the nested /usage agy`, { skip: process.platform === "win32" }, () => {
+    const box = sandbox();
+    fakeNode(box.bin, "path");
+    const result = spawnSync(shell, [hook], {
+      encoding: "utf8",
+      input: '{"agent_state":"idle"}\n{"agent_state":"idle"}',
+      env: { HOME: box.home, PATH: box.bin, AGY_HUD_NESTED: "1" }
+    });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
+
   test(`status-line.sh (${path.basename(shell)}) says so and exits 127 when no node is found`, { skip: process.platform === "win32" }, () => {
     const box = sandbox();
     const result = runHook(shell, box, { AGY_HUD_NO_SYSTEM_NODE: "1" });
