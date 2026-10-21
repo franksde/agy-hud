@@ -45,6 +45,7 @@ export interface DoctorReport {
   homedir: string;
   nodeVersion: string;
   nodeOk: boolean;
+  platform: string;
   statuslineCommand: string | null;
   statuslineWired: boolean;
   configPath: string | null;
@@ -82,6 +83,7 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     homedir: deps.homedir,
     nodeVersion: deps.nodeVersion,
     nodeOk: nodeMajor(deps.nodeVersion) >= 18,
+    platform: deps.platform,
     statuslineCommand,
     statuslineWired,
     configPath: config.path,
@@ -243,6 +245,10 @@ function clip(name: string): string {
 }
 
 function fontDirs(deps: DoctorDeps): string[] {
+  if (deps.platform === "win32") {
+    const windir = deps.env.WINDIR || "C:\\Windows";
+    return [`${windir}\\Fonts`, `${deps.homedir}\\AppData\\Local\\Microsoft\\Windows\\Fonts`];
+  }
   return [`${deps.homedir}/Library/Fonts`, "/Library/Fonts", "/System/Library/Fonts"];
 }
 
@@ -305,7 +311,7 @@ export function formatDoctorReport(report: DoctorReport): string {
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
   row("statusline", report.statuslineCommand
     ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`
-    : "not configured — run /statusline <plugin-root>/hooks/status-line.sh in the CLI");
+    : `not configured — run /statusline <plugin-root>/hooks/${report.platform === "win32" ? "status-line.cmd" : "status-line.sh"} in the CLI`);
   rows("installed", installedLines(report, short));
   rows("config", [
     report.configPath
@@ -367,7 +373,7 @@ function installedLines(report: DoctorReport, short: (filePath: string) => strin
   if (report.statuslineRunsInstalled === false) {
     out.push("the status line runs a different copy, so upgrades installed with");
     out.push("`agy plugin install` will not reach it. Rewire it in the CLI:");
-    out.push(`/statusline ${short(plugin.path.replace(/\/$/, ""))}/hooks/status-line.sh`);
+    out.push(`/statusline ${short(plugin.path.replace(/\/$/, ""))}/hooks/${report.platform === "win32" ? "status-line.cmd" : "status-line.sh"}`);
   }
   return out;
 }

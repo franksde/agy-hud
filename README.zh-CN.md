@@ -12,7 +12,7 @@
 
 - Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.3.5;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
-- macOS 或 Linux。目前暂不支持 Windows,因为插件 hook/install 流程尚未在 Windows 上验证。
+- macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
 
 `agy-hud` 以 Antigravity 插件归档包分发,不是 npm 包。归档包内已包含打包后的运行脚本 `dist/agy-hud.js`,所以插件用户不需要运行 `npm install`。
@@ -35,6 +35,11 @@ agy plugin install ./agy-hud
 /statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh
 ```
 
+在 Windows 上：
+```
+/statusline %USERPROFILE%\.gemini\config\plugins\agy-hud\hooks\status-line.cmd
+```
+
 ## 从本地路径安装
 
 不要把 git clone 出来的仓库目录直接传给 `agy plugin install`。该命令会拷贝**整个**目录,于是 `.git/`、`src/`、`test/` 之类全都会被塞进插件目录;而且如果这个 clone 启用了 git fsmonitor,拷贝会直接失败在 `.git/fsmonitor--daemon.ipc` 上——那是一个 socket,不是普通文件。
@@ -47,7 +52,7 @@ npm ci && npm run build && npm test
 stage=$(mktemp -d)/agy-hud
 mkdir -p "$stage/hooks" "$stage/dist" "$stage/docs"
 cp plugin.json config.example.json README.md README.zh-CN.md LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
-cp hooks/status-line.sh "$stage/hooks/"
+cp hooks/status-line.sh hooks/status-line.cmd "$stage/hooks/"
 cp dist/agy-hud.js "$stage/dist/"
 cp docs/hud-preview.png "$stage/docs/"
 

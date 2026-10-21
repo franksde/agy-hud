@@ -12,7 +12,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 
 - Antigravity CLI 1.1.0 or newer. Install, status-line wiring and rendering are verified through 1.3.5, as is the `/usage` fallback; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
 - Node.js 18+. `node` does not have to be on the `PATH` the CLI starts the status line with: `hooks/status-line.sh` also looks where nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew install it (see [Node Is Not Found](#node-is-not-found))
-- macOS or Linux. Windows is not currently supported because the plugin hook/install flow has not been verified there.
+- macOS, Linux, or Windows. On macOS/Linux `hooks/status-line.sh` is used; on Windows `hooks/status-line.cmd` is provided.
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
 
 `agy-hud` is distributed as an Antigravity plugin archive, not as an npm package. The archive includes the bundled runtime script at `dist/agy-hud.js`, so plugin users do not need to run `npm install`.
@@ -35,6 +35,11 @@ The extracted directory is a complete plugin (`plugin.json`, `hooks/`, `dist/`),
 /statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.sh
 ```
 
+On Windows:
+```
+/statusline %USERPROFILE%\.gemini\config\plugins\agy-hud\hooks\status-line.cmd
+```
+
 ## Install From Local Path
 
 Do not pass a git clone straight to `agy plugin install`. The command copies the *entire* directory, so it would drag `.git/`, `src/`, `test/`, and everything else into the plugin directory — and if the clone has git's fsmonitor enabled, the copy aborts outright on `.git/fsmonitor--daemon.ipc`, because it is a socket rather than a file.
@@ -47,7 +52,7 @@ npm ci && npm run build && npm test
 stage=$(mktemp -d)/agy-hud
 mkdir -p "$stage/hooks" "$stage/dist" "$stage/docs"
 cp plugin.json config.example.json README.md README.zh-CN.md LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CONTRIBUTING.md CHANGELOG.md "$stage/"
-cp hooks/status-line.sh "$stage/hooks/"
+cp hooks/status-line.sh hooks/status-line.cmd "$stage/hooks/"
 cp dist/agy-hud.js "$stage/dist/"
 cp docs/hud-preview.png "$stage/docs/"
 

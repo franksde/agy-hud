@@ -495,3 +495,13 @@ test("does not blame the listing command for an entry that only lacks a path", (
   assert.match(text, /installed\s+unknown/);
   assert.doesNotMatch(text, /could not read/);
 });
+
+test("recommends status-line.cmd on Windows", () => {
+  const report = collectDoctorReport(deps({
+    platform: "win32",
+    pluginList: () => pluginListJson,
+    readFile: wiredTo("/home/u/.gemini/antigravity-cli/plugins/agy-hud/hooks/status-line.cmd")
+  }));
+  const text = formatDoctorReport(report);
+  assert.ok(text.includes("/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.cmd"));
+});
