@@ -496,12 +496,78 @@ test("does not blame the listing command for an entry that only lacks a path", (
   assert.doesNotMatch(text, /could not read/);
 });
 
-test("recommends status-line.cmd on Windows", () => {
-  const report = collectDoctorReport(deps({
+// Windows. Antigravity's own paths there use backslashes and NTFS ignores case, so the comparison and
+// the home abbreviation accept either separator in any case. The paths below are the shape a Windows
+// install reports, not POSIX paths with the platform switched.
+const winHome = "C:\\Users\\u";
+const winRoot = `${winHome}\\.gemini\\config\\plugins\\agy-hud`;
+const winSettings = `${winHome}\\.gemini\\antigravity-cli\\settings.json`;
+
+function winDeps(command: string | null, overrides: Partial<DoctorDeps> = {}): DoctorDeps {
+  return deps({
     platform: "win32",
-    pluginList: () => pluginListJson,
-    readFile: wiredTo("/home/u/.gemini/antigravity-cli/plugins/agy-hud/hooks/status-line.cmd")
-  }));
+    homedir: winHome,
+    env: { WINDIR: "C:\\Windows", LOCALAPPDATA: `${winHome}\\AppData\\Local` },
+    userConfigPath: `${winHome}\\.config\\agy-hud\\config.json`,
+    pluginList: () => JSON.stringify([{ name: "agy-hud", enabled: true, version: "0.1.13", path: winRoot }]),
+    readFile: p => (p === winSettings && command !== null ? JSON.stringify({ statusLine: { command } }) : null),
+    ...overrides
+  });
+}
+
+test("on Windows, a status line wired to the installed copy is recognised in any spelling", () => {
+  for (const command of [
+    `${winRoot}\\hooks\\status-line.cmd`,
+    "c:/users/u/.gemini/config/plugins/agy-hud/hooks/status-line.cmd",
+    "%USERPROFILE%\\.gemini\\config\\plugins\\agy-hud\\hooks\\status-line.cmd",
+    "~\\.gemini\\config\\plugins\\agy-hud\\hooks\\status-line.cmd",
+    `node "${winRoot}\\dist\\agy-hud.js" statusline`
+  ]) {
+    assert.equal(collectDoctorReport(winDeps(command)).statuslineRunsInstalled, true, command);
+  }
+});
+
+test("on Windows, a sibling directory sharing the installed path as a prefix is another copy", () => {
+  assert.equal(collectDoctorReport(winDeps(`${winRoot}-old\\hooks\\status-line.cmd`)).statuslineRunsInstalled, false);
+});
+
+test("on Windows, the rewire command and home paths use backslashes and ~", () => {
+  const report = collectDoctorReport(winDeps(`${winHome}\\.gemini\\antigravity-cli\\plugins\\agy-hud\\hooks\\status-line.cmd`));
+  assert.equal(report.statuslineRunsInstalled, false);
   const text = formatDoctorReport(report);
-  assert.ok(text.includes("/statusline ~/.gemini/config/plugins/agy-hud/hooks/status-line.cmd"));
+  assert.ok(text.includes("/statusline ~\\.gemini\\config\\plugins\\agy-hud\\hooks\\status-line.cmd"), text);
+  assert.ok(text.includes("~\\.gemini\\antigravity-cli\\plugins\\agy-hud\\hooks\\status-line.cmd"), "the statusline row hides the account name");
+  assert.ok(!text.includes("Users\\u"), text);
+});
+
+test("on Windows, an unwired status line is told to run status-line.cmd", () => {
+  const text = formatDoctorReport(collectDoctorReport(winDeps(null)));
+  assert.ok(text.includes("/statusline <plugin-root>\\hooks\\status-line.cmd"), text);
+});
+
+test("on Windows, fonts are scanned in the system and per-user font folders", () => {
+  const seen: string[] = [];
+  const report = collectDoctorReport(winDeps(null, {
+    listDir: p => {
+      seen.push(p);
+      return p === `${winHome}\\AppData\\Local\\Microsoft\\Windows\\Fonts` ? ["HackNerdFont-Regular.ttf"] : [];
+    }
+  }));
+  assert.deepEqual(seen, ["C:\\Windows\\Fonts", `${winHome}\\AppData\\Local\\Microsoft\\Windows\\Fonts`]);
+  assert.equal(report.nerdFont, "found");
+});
+
+test("recognises Windows Terminal and names its font setting", () => {
+  const report = collectDoctorReport(winDeps(null, { env: { WT_SESSION: "8c2f" } }));
+  assert.equal(report.terminal, "Windows Terminal");
+  assert.ok(formatDoctorReport(report).includes("Windows Terminal -> Settings -> Profiles -> Defaults -> Appearance -> Font face"));
+});
+
+// cmd has no mkdir -p, and Windows PowerShell 5.1's > writes UTF-16, which the config loader cannot
+// parse. Font installs are not brew there either.
+test("on Windows, the icons-off fix is PowerShell that writes plain ASCII", () => {
+  const text = formatDoctorReport(collectDoctorReport(winDeps(null)));
+  assert.ok(text.includes('New-Item -ItemType Directory -Force -Path "~\\.config\\agy-hud"'), text);
+  assert.ok(text.includes(`Set-Content -Encoding ascii -Path "~\\.config\\agy-hud\\config.json" -Value '{"show_icons": false}'`), text);
+  assert.doesNotMatch(text, /mkdir -p|brew install/);
 });

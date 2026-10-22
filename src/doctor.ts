@@ -99,7 +99,7 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     installedPluginStatus,
     // A status line owned by another tool is not ours to rewire, so the comparison only applies when
     // the command runs agy-hud at all.
-    statuslineRunsInstalled: statuslineWired ? runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir) : null
+    statuslineRunsInstalled: statuslineWired ? runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir, deps.platform) : null
   };
 }
 
@@ -137,16 +137,25 @@ function readInstalledPlugin(deps: DoctorDeps): ["found" | "not-installed" | "un
 // The status line is wired through settings, not through the plugin, so `agy plugin install` only
 // reaches the HUD when the command runs a file under the installed root. The trailing separator keeps
 // a sibling such as `agy-hud-old` from passing as the installed copy.
-function runsInstalledCopy(command: string | null, plugin: InstalledPlugin | null, homedir: string): boolean | null {
+function runsInstalledCopy(command: string | null, plugin: InstalledPlugin | null, homedir: string, platform: string): boolean | null {
   if (command === null || plugin === null) {
     return null;
   }
-  const home = homedir.replace(/\/$/, "");
-  const expanded = home === ""
-    ? command
+  // Windows takes either separator and NTFS ignores case, so there both sides are folded to forward
+  // slashes and lower case before they are compared, and %USERPROFILE% counts as home as well.
+  const windows = platform === "win32";
+  const fold = windows ? (text: string) => text.split("\\").join("/").toLowerCase() : (text: string) => text;
+  const home = fold(homedir).replace(/\/$/, "");
+  let expanded = fold(command);
+  if (home !== "") {
     // A replacer function, so a `$` in the home directory is never read as a replacement pattern.
-    : command.replace(/(^|\s)~\//g, (_, lead: string) => `${lead}${home}/`).split("${HOME}/").join(`${home}/`).split("$HOME/").join(`${home}/`);
-  const root = plugin.path.endsWith("/") ? plugin.path : `${plugin.path}/`;
+    expanded = expanded.replace(/(^|\s)~\//g, (_, lead: string) => `${lead}${home}/`);
+    for (const token of windows ? ["${HOME}/", "$HOME/", "%USERPROFILE%/"] : ["${HOME}/", "$HOME/"]) {
+      expanded = expanded.split(fold(token)).join(`${home}/`);
+    }
+  }
+  const pluginPath = fold(plugin.path);
+  const root = pluginPath.endsWith("/") ? pluginPath : `${pluginPath}/`;
   return expanded.includes(root);
 }
 
@@ -156,6 +165,10 @@ function runsInstalledCopy(command: string | null, plugin: InstalledPlugin | nul
 function detectTerminal(env: Record<string, string | undefined>): string {
   if (env.TERM_PROGRAM) {
     return env.TERM_PROGRAM;
+  }
+  // Windows Terminal sets no TERM_PROGRAM either, only a session id.
+  if (env.WT_SESSION) {
+    return "Windows Terminal";
   }
   if (env.KITTY_WINDOW_ID) {
     return "kitty";
@@ -196,7 +209,8 @@ function homeConfigPath(deps: DoctorDeps): string {
 }
 
 function readStatuslineCommand(deps: DoctorDeps): [string | null, boolean] {
-  const raw = deps.readFile(`${deps.homedir}/.gemini/antigravity-cli/settings.json`);
+  const sep = separator(deps.platform);
+  const raw = deps.readFile([deps.homedir, ".gemini", "antigravity-cli", "settings.json"].join(sep));
   if (raw === null) {
     return [null, false];
   }
@@ -246,8 +260,10 @@ function clip(name: string): string {
 
 function fontDirs(deps: DoctorDeps): string[] {
   if (deps.platform === "win32") {
+    // Fonts installed for all users, and those installed for the current user only.
     const windir = deps.env.WINDIR || "C:\\Windows";
-    return [`${windir}\\Fonts`, `${deps.homedir}\\AppData\\Local\\Microsoft\\Windows\\Fonts`];
+    const localAppData = deps.env.LOCALAPPDATA || `${deps.homedir}\\AppData\\Local`;
+    return [`${windir}\\Fonts`, `${localAppData}\\Microsoft\\Windows\\Fonts`];
   }
   return [`${deps.homedir}/Library/Fonts`, "/Library/Fonts", "/System/Library/Fonts"];
 }
@@ -274,6 +290,8 @@ function fontSettingHint(terminal: string): string {
       return "config.fontFamily in ~/.hyper.js";
     case "tabby":
       return "Tabby -> Settings -> Appearance -> Font";
+    case "Windows Terminal":
+      return "Windows Terminal -> Settings -> Profiles -> Defaults -> Appearance -> Font face";
     default:
       return "your terminal's font setting (profile or config file)";
   }
@@ -283,7 +301,10 @@ function fontSettingHint(terminal: string): string {
 // what they will paste when the HUD looks wrong. Abbreviating the home prefix drops the account name
 // while keeping every path recognizable. The JSON form keeps absolute paths: it is read by an agent
 // on the same machine, and shortening them there would only make it harder to act on.
-function abbreviate(text: string, homedir: string): string {
+function abbreviate(text: string, homedir: string, platform: string): string {
+  if (platform === "win32") {
+    return abbreviateWindows(text, homedir);
+  }
   // "/" as a home directory would match every absolute path on the system, rewriting the whole
   // filesystem as if it sat under home. An empty home has nothing to abbreviate either.
   if (homedir === "" || homedir === "/") {
@@ -295,6 +316,26 @@ function abbreviate(text: string, homedir: string): string {
   return text.split(prefix).join("~/");
 }
 
+// The same on Windows, where a path may spell home with either separator and in any case. The
+// separator after home is kept, so `C:\Users\u\x` becomes `~\x`. A drive root as home would match
+// every path on the drive, so a home without a directory under the drive is left alone.
+function abbreviateWindows(text: string, homedir: string): string {
+  const parts = homedir.split(/[\\/]+/).filter(part => part !== "");
+  if (parts.length < 2) {
+    return text;
+  }
+  const pattern = parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\\\/]");
+  return text.replace(new RegExp(`${pattern}([\\\\/])`, "gi"), (_, sep: string) => `~${sep}`);
+}
+
+function separator(platform: string): string {
+  return platform === "win32" ? "\\" : "/";
+}
+
+function hookName(platform: string): string {
+  return platform === "win32" ? "status-line.cmd" : "status-line.sh";
+}
+
 export function formatDoctorReport(report: DoctorReport): string {
   const lines: string[] = [];
   const row = (label: string, value: string) => lines.push(`  ${label.padEnd(12)}${value}`);
@@ -303,7 +344,9 @@ export function formatDoctorReport(report: DoctorReport): string {
     row(label, values[0]);
     for (const extra of values.slice(1)) lines.push(" ".repeat(14) + extra);
   };
-  const short = (filePath: string) => abbreviate(filePath, report.homedir);
+  const short = (filePath: string) => abbreviate(filePath, report.homedir, report.platform);
+  const sep = separator(report.platform);
+  const windows = report.platform === "win32";
 
   lines.push("agy-hud doctor");
   lines.push("");
@@ -311,7 +354,7 @@ export function formatDoctorReport(report: DoctorReport): string {
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
   row("statusline", report.statuslineCommand
     ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`
-    : `not configured — run /statusline <plugin-root>/hooks/${report.platform === "win32" ? "status-line.cmd" : "status-line.sh"} in the CLI`);
+    : `not configured — run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`);
   rows("installed", installedLines(report, short));
   rows("config", [
     report.configPath
@@ -344,13 +387,20 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push('       Set "show_icons": false in it. Edit that file, do not create another one:');
     lines.push("       a config next to the bundle outranks the one under ~/.config, so a new file");
     lines.push("       there would be shadowed and nothing would change.");
+  } else if (windows) {
+    // PowerShell, since cmd has no mkdir -p, and with an explicit encoding: Windows PowerShell 5.1
+    // writes UTF-16 through >, which the config loader cannot parse.
+    lines.push(`       New-Item -ItemType Directory -Force -Path "${short(dirname(report.suggestedConfigPath, report.platform))}" | Out-Null`);
+    lines.push(`       Set-Content -Encoding ascii -Path "${short(report.suggestedConfigPath)}" -Value '{"show_icons": false}'`);
   } else {
-    lines.push(`       mkdir -p ${short(dirname(report.suggestedConfigPath))}`);
+    lines.push(`       mkdir -p ${short(dirname(report.suggestedConfigPath, report.platform))}`);
     lines.push(`       echo '{"show_icons": false}' > ${short(report.suggestedConfigPath)}`);
   }
   lines.push("");
   lines.push("  B. Keep icons. This takes two steps, and the second is the one that matters:");
-  lines.push("       1. Install a Nerd Font, e.g. brew install --cask font-hack-nerd-font");
+  lines.push(windows
+    ? "       1. Install a Nerd Font, e.g. Hack Nerd Font from https://www.nerdfonts.com"
+    : "       1. Install a Nerd Font, e.g. brew install --cask font-hack-nerd-font");
   lines.push(`       2. Point the terminal at it: ${fontSettingHint(report.terminal)}`);
   lines.push("     Step 1 alone changes nothing on screen.");
   if (report.remoteSession) {
@@ -373,13 +423,15 @@ function installedLines(report: DoctorReport, short: (filePath: string) => strin
   if (report.statuslineRunsInstalled === false) {
     out.push("the status line runs a different copy, so upgrades installed with");
     out.push("`agy plugin install` will not reach it. Rewire it in the CLI:");
-    out.push(`/statusline ${short(plugin.path.replace(/\/$/, ""))}/hooks/${report.platform === "win32" ? "status-line.cmd" : "status-line.sh"}`);
+    const sep = separator(report.platform);
+    const root = plugin.path.replace(report.platform === "win32" ? /[\\/]$/ : /\/$/, "");
+    out.push(`/statusline ${short(root)}${sep}hooks${sep}${hookName(report.platform)}`);
   }
   return out;
 }
 
-function dirname(filePath: string): string {
-  const cut = filePath.lastIndexOf("/");
+function dirname(filePath: string, platform: string): string {
+  const cut = platform === "win32" ? Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\")) : filePath.lastIndexOf("/");
   if (cut < 0) {
     return filePath;
   }
