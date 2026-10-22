@@ -1,4 +1,4 @@
-import { Config, defaultConfig, parseConfig } from "./config";
+import { Config, defaultConfig, parseConfig, stripBom } from "./config";
 
 // The four Private Use Area glyphs src/statusline.ts renders. A terminal font without Nerd Font
 // coverage draws each of them as a box or [?]; U+21BB, the quota reset arrow, is standard Unicode
@@ -216,7 +216,7 @@ function readStatuslineCommand(deps: DoctorDeps): [string | null, boolean] {
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripBom(raw));
   } catch {
     return [null, false];
   }
@@ -225,7 +225,8 @@ function readStatuslineCommand(deps: DoctorDeps): [string | null, boolean] {
   if (command === null || command === "") {
     return [null, false];
   }
-  return [command, command.includes("agy-hud")];
+  // Windows paths are case-insensitive, so AGY-HUD there is the same directory.
+  return [command, (deps.platform === "win32" ? command.toLowerCase() : command).includes("agy-hud")];
 }
 
 function scanNerdFont(deps: DoctorDeps): ["found" | "not-found" | "unknown", string[]] {
@@ -317,14 +318,16 @@ function abbreviate(text: string, homedir: string, platform: string): string {
 }
 
 // The same on Windows, where a path may spell home with either separator and in any case. The
-// separator after home is kept, so `C:\Users\u\x` becomes `~\x`. A drive root as home would match
-// every path on the drive, so a home without a directory under the drive is left alone.
+// separator after home is kept, so `C:\Users\u\x` becomes `~\x`. A drive root (`C:\`) or a share
+// root (`\\server\share`) as home would match every path under it, so such a home is left alone.
+// A share's leading `\\` belongs to home: leaving it out would print `\\~\x`, a server named `~`.
 function abbreviateWindows(text: string, homedir: string): string {
+  const unc = /^[\\/]{2}/.test(homedir);
   const parts = homedir.split(/[\\/]+/).filter(part => part !== "");
-  if (parts.length < 2) {
+  if (parts.length < (unc ? 3 : 2)) {
     return text;
   }
-  const pattern = parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\\\/]");
+  const pattern = (unc ? "[\\\\/]{2}" : "") + parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\\\/]");
   return text.replace(new RegExp(`${pattern}([\\\\/])`, "gi"), (_, sep: string) => `~${sep}`);
 }
 

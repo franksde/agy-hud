@@ -77,3 +77,9 @@ test("show_mode is on by default and honored from config JSON", () => {
   assert.equal(defaultConfig().showMode, true);
   assert.equal(parseConfig(JSON.stringify({ show_mode: false })).showMode, false);
 });
+
+// Notepad and Windows PowerShell's Set-Content -Encoding utf8 write a UTF-8 BOM. JSON.parse rejects
+// it, which used to drop the whole file silently and render with the defaults.
+test("a config file that starts with a UTF-8 byte order mark is still read", () => {
+  assert.equal(parseConfig("\uFEFF" + JSON.stringify({ show_icons: false })).showIcons, false);
+});

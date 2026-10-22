@@ -51,10 +51,16 @@ export function loadFromPaths(paths: string[]): Config {
 
 export function parseConfig(raw: string): Config {
   try {
-    return merge(defaultConfig(), JSON.parse(raw));
+    return merge(defaultConfig(), JSON.parse(stripBom(raw)));
   } catch {
     return defaultConfig();
   }
+}
+
+// Notepad and Windows PowerShell's Set-Content -Encoding utf8 start a UTF-8 file with a byte order
+// mark, which JSON.parse rejects.
+export function stripBom(text: string): string {
+  return text.startsWith("\uFEFF") ? text.slice(1) : text;
 }
 
 function merge(base: Config, patch: Record<string, unknown>): Config {

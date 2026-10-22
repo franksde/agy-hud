@@ -202,10 +202,13 @@ function loadFromPaths(paths) {
 }
 function parseConfig(raw) {
   try {
-    return merge(defaultConfig(), JSON.parse(raw));
+    return merge(defaultConfig(), JSON.parse(stripBom(raw)));
   } catch {
     return defaultConfig();
   }
+}
+function stripBom(text) {
+  return text.startsWith("\uFEFF") ? text.slice(1) : text;
 }
 function merge(base, patch) {
   if (typeof patch.show_model === "boolean") base.showModel = patch.show_model;
@@ -1505,7 +1508,7 @@ function readStatuslineCommand(deps) {
   }
   let parsed;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripBom(raw));
   } catch {
     return [null, false];
   }
@@ -1514,7 +1517,7 @@ function readStatuslineCommand(deps) {
   if (command === null || command === "") {
     return [null, false];
   }
-  return [command, command.includes("agy-hud")];
+  return [command, (deps.platform === "win32" ? command.toLowerCase() : command).includes("agy-hud")];
 }
 function scanNerdFont(deps) {
   if (deps.platform === "linux") {
@@ -1584,11 +1587,12 @@ function abbreviate(text, homedir, platform) {
   return text.split(prefix).join("~/");
 }
 function abbreviateWindows(text, homedir) {
+  const unc = /^[\\/]{2}/.test(homedir);
   const parts = homedir.split(/[\\/]+/).filter((part) => part !== "");
-  if (parts.length < 2) {
+  if (parts.length < (unc ? 3 : 2)) {
     return text;
   }
-  const pattern = parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\\\/]");
+  const pattern = (unc ? "[\\\\/]{2}" : "") + parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\\\/]");
   return text.replace(new RegExp(`${pattern}([\\\\/])`, "gi"), (_, sep) => `~${sep}`);
 }
 function separator(platform) {

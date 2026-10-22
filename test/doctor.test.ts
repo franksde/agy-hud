@@ -540,6 +540,50 @@ test("on Windows, the rewire command and home paths use backslashes and ~", () =
   assert.ok(!text.includes("Users\\u"), text);
 });
 
+// A roaming profile can put home on a share. Matching it without the leading \\ left `\\~\...`,
+// a path to a server named ~, in every command doctor printed.
+test("on Windows, a home on a UNC share is abbreviated with its whole prefix", () => {
+  const home = "\\\\server\\share\\u";
+  const report = collectDoctorReport(winDeps(`${home}\\.gemini\\antigravity-cli\\plugins\\agy-hud\\hooks\\status-line.cmd`, {
+    homedir: home,
+    userConfigPath: `${home}\\.config\\agy-hud\\config.json`,
+    readFile: p => (p === `${home}\\.gemini\\antigravity-cli\\settings.json`
+      ? JSON.stringify({ statusLine: { command: `${home}\\.gemini\\antigravity-cli\\plugins\\agy-hud\\hooks\\status-line.cmd` } })
+      : null),
+    pluginList: () => JSON.stringify([{ name: "agy-hud", enabled: true, version: "0.1.13", path: `${home}\\.gemini\\config\\plugins\\agy-hud` }])
+  }));
+  const text = formatDoctorReport(report);
+  assert.ok(text.includes("/statusline ~\\.gemini\\config\\plugins\\agy-hud\\hooks\\status-line.cmd"), text);
+  assert.ok(text.includes('-Path "~\\.config\\agy-hud\\config.json"'), text);
+  assert.ok(!text.includes("\\\\~"), text);
+});
+
+test("on Windows, a share root as home is left alone like a drive root", () => {
+  const text = formatDoctorReport(collectDoctorReport(winDeps(null, {
+    homedir: "\\\\server\\share",
+    userConfigPath: "\\\\server\\share\\.config\\agy-hud\\config.json"
+  })));
+  assert.ok(text.includes('-Path "\\\\server\\share\\.config\\agy-hud\\config.json"'), text);
+});
+
+// The directory name is case-insensitive on Windows, so an AGY-HUD in the path still runs agy-hud.
+test("on Windows, a status line wired through an upper-case AGY-HUD directory counts as agy-hud", () => {
+  const report = collectDoctorReport(winDeps(`${winHome}\\.gemini\\config\\plugins\\AGY-HUD\\hooks\\status-line.cmd`));
+  assert.equal(report.statuslineWired, true);
+  assert.equal(report.statuslineRunsInstalled, true);
+});
+
+// Notepad and Windows PowerShell's Set-Content -Encoding utf8 save a UTF-8 BOM, which JSON.parse
+// rejects. The CLI reads such a settings file, so doctor must too.
+test("reads a settings file that starts with a UTF-8 byte order mark", () => {
+  const report = collectDoctorReport(deps({
+    readFile: p => (p === "/home/u/.gemini/antigravity-cli/settings.json"
+      ? "\uFEFF" + JSON.stringify({ statusLine: { command: "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh" } })
+      : null)
+  }));
+  assert.equal(report.statuslineWired, true);
+});
+
 test("on Windows, an unwired status line is told to run status-line.cmd", () => {
   const text = formatDoctorReport(collectDoctorReport(winDeps(null)));
   assert.ok(text.includes("/statusline <plugin-root>\\hooks\\status-line.cmd"), text);
