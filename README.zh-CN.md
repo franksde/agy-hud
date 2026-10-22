@@ -12,7 +12,7 @@
 
 - Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入和渲染以及 `/usage` 回退已验证至 1.3.5;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
-- macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`。
+- macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`,且 CLI 必须是通过 `cmd.exe` 运行状态栏的版本,大概是 1.1.2 或更新(见[从 GitHub Release 安装](#从-github-release-安装))。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
 
 `agy-hud` 以 Antigravity 插件归档包分发,不是 npm 包。归档包内已包含打包后的运行脚本 `dist/agy-hud.js`,所以插件用户不需要运行 `npm install`。
