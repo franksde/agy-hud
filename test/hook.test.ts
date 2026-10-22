@@ -390,3 +390,24 @@ for (const shell of shells) {
 test("status-line.sh is exercised by at least one shell", { skip: process.platform === "win32" }, () => {
   assert.ok(shells.length > 0);
 });
+
+// The release archive and the READMEs' local staging list their files by hand, so a hook missing
+// from any of them ships nowhere: hooks/status-line.cmd was once left out of the release archive.
+test("every hook is copied by the release workflow and both READMEs' staging steps", () => {
+  const hooks = fs.readdirSync(path.join(root, "hooks"));
+  assert.ok(hooks.includes("status-line.sh") && hooks.includes("status-line.cmd"));
+  for (const file of [".github/workflows/release.yml", "README.md", "README.zh-CN.md"]) {
+    const copies = fs.readFileSync(path.join(root, file), "utf8").split("\n").filter(line => /^\s*cp .*hooks\//.test(line)).join("\n");
+    for (const name of hooks) {
+      assert.ok(copies.includes(`hooks/${name}`), `${file} does not copy hooks/${name}`);
+    }
+  }
+});
+
+// cmd.exe misparses some batch files with bare LF line endings, so the hook is checked out with CRLF
+// wherever it is built, the Linux release runner included (see .gitattributes).
+test("status-line.cmd is checked out with CRLF line endings", () => {
+  const text = fs.readFileSync(path.join(root, "hooks", "status-line.cmd"), "utf8");
+  assert.ok(text.includes("\r\n"));
+  assert.doesNotMatch(text, /[^\r]\n/);
+});
