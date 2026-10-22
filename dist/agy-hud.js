@@ -1031,7 +1031,7 @@ function quotaInfo(cache, modelDisplay, officialQuota, now) {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
     const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now);
-    const plan = officialQuota && Object.keys(officialQuota).length > 0 ? officialQuota : merged;
+    const plan = officialQuota && geminiPlanKeys.some((key) => Object.prototype.hasOwnProperty.call(officialQuota, key)) ? officialQuota : merged;
     const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
     if (mergedInfo !== null) {
       return mergedInfo;
@@ -1168,6 +1168,7 @@ function noQuota() {
   return { usagePct: 0, reset: "", hasQuota: false, windows: [] };
 }
 var argonWeeklyKey = "gemini-argon-wtu-weekly";
+var geminiPlanKeys = ["gemini-5h", "gemini-weekly", argonWeeklyKey];
 function officialQuotaKeys(modelDisplay, quota) {
   const normalized = modelDisplay.toLowerCase();
   if (normalized.includes("claude") || normalized.includes("gpt") || normalized.includes("oss")) {

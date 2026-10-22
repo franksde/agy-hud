@@ -333,10 +333,11 @@ function withIcon(config: Config, icon: string, fallback: string): string {
 function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, officialQuota: Record<string, OfficialQuotaBucket> | undefined, now: Date): QuotaDisplay {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    // Which buckets apply is the plan's call, and a payload with quota states it for this session; a
-    // cache read under another plan must not decide it. Without payload quota the cache is all there is.
+    // Which buckets apply is the plan's call, and a payload carrying Gemini quota states it for this
+    // session; a cache read under another plan must not decide it. A payload without Gemini quota says
+    // nothing about Argon, so then the cache is all there is.
     const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now);
-    const plan = officialQuota && Object.keys(officialQuota).length > 0 ? officialQuota : merged;
+    const plan = officialQuota && geminiPlanKeys.some(key => Object.prototype.hasOwnProperty.call(officialQuota, key)) ? officialQuota : merged;
     const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
     if (mergedInfo !== null) {
       return mergedInfo;
@@ -504,6 +505,8 @@ function noQuota(): QuotaDisplay {
 // no 5-hour one, so neither Gemini bucket applies to it. Ultra plans count Argon against the Gemini
 // buckets and send no Argon bucket, which is why its absence falls through to them.
 const argonWeeklyKey = "gemini-argon-wtu-weekly";
+// The buckets whose presence tells which of the two a plan is.
+const geminiPlanKeys = ["gemini-5h", "gemini-weekly", argonWeeklyKey];
 
 function officialQuotaKeys(modelDisplay: string, quota: Record<string, OfficialQuotaBucket>): Array<{ key: string; label: string }> {
   const normalized = modelDisplay.toLowerCase();

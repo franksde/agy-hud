@@ -293,6 +293,20 @@ test("an Argon bucket only in the usage cache does not override a payload withou
   assert.doesNotMatch(line, /0% left/);
 });
 
+// Only Gemini buckets say anything about how the plan treats Argon. A payload carrying nothing but
+// third-party quota is silent on it, so the cache still decides.
+test("a payload with only third-party quota leaves the Argon decision to the usage cache", () => {
+  const payload = fixturePayload();
+  payload.model = { display_name: "Gemini 4 Argon (Medium)" };
+  payload.quota = { "3p-5h": { remaining_fraction: 0.9, reset_time: fiveHourReset } };
+  const config = defaultConfig();
+  config.color = false;
+  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {},
+    quota: { "gemini-argon-wtu-weekly": { remaining_fraction: 0.25, reset_time: weeklyReset } } };
+  const out = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") }));
+  assert.match(out, /Usage \S+ 25% left/);
+});
+
 test("Gemini models other than Argon ignore the Argon bucket", () => {
   const payload = { ...fixturePayload(), terminal_width: 180, model: { display_name: "Gemini 3.8 Flash (High)" }, quota: {
     "gemini-5h": { remaining_fraction: 0.42 }, "gemini-weekly": { remaining_fraction: 0.81 },
