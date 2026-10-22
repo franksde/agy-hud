@@ -39,7 +39,7 @@ npm test
 grep -A2 '"statusLine"' "$HOME/.gemini/antigravity-cli/settings.json"
 ```
 
-The command points either at `<plugin-root>/hooks/status-line.sh` or at `<plugin-root>/dist/agy-hud.js`. The plugin root is the `agy-hud` directory in that path, not `hooks/` and not `dist/`. Sync the bundle into that root:
+The command points either at `<plugin-root>/hooks/status-line.sh` (`hooks\status-line.cmd` on Windows) or at `<plugin-root>/dist/agy-hud.js`. The plugin root is the `agy-hud` directory in that path, not `hooks/` and not `dist/`. Sync the bundle into that root:
 
 ```sh
 cp dist/agy-hud.js <plugin-root>/dist/agy-hud.js
@@ -166,6 +166,11 @@ Linux. Rules that are easy to break from macOS:
   editor that keeps CRLF.
 - **Every file in `hooks/` must be in the release archive and in both READMEs' staging steps.**
   These lists are written by hand; `test/hook.test.ts` checks them.
+- **No bare program names in `status-line.cmd`.** cmd.exe searches the current directory, the
+  user's workspace, before PATH. Find node with `%%~$PATH:`, which searches PATH alone, and name
+  every other program by its full path; `test/hook.test.ts` checks the text.
+- **No quotes in a `/statusline` command on Windows.** The CLI escapes them to `\"`, which cmd.exe
+  does not read (tightship#89); a path with a space takes its 8.3 short form.
 - **No loopback probe on Windows.** `refreshQuota` reports the loopback as refused there without
   running `ps` or `lsof`, which do not exist, so refreshes take the `/usage` route with its pacing.
 - **Detached children need `windowsHide: true`,** or each refresh opens a console window.

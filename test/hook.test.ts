@@ -393,13 +393,27 @@ test("status-line.sh is exercised by at least one shell", { skip: process.platfo
 
 // The release archive and the READMEs' local staging list their files by hand, so a hook missing
 // from any of them ships nowhere: hooks/status-line.cmd was once left out of the release archive.
-test("every hook is copied by the release workflow and both READMEs' staging steps", () => {
+test("every hook is copied into hooks/ by the release workflow and both READMEs' staging steps", () => {
   const hooks = fs.readdirSync(path.join(root, "hooks"));
   assert.ok(hooks.includes("status-line.sh") && hooks.includes("status-line.cmd"));
   for (const file of [".github/workflows/release.yml", "README.md", "README.zh-CN.md"]) {
-    const copies = fs.readFileSync(path.join(root, file), "utf8").split("\n").filter(line => /^\s*cp .*hooks\//.test(line)).join("\n");
+    // A copy counts only when its last argument, the destination, is the staged plugin's hooks/.
+    const copies = fs.readFileSync(path.join(root, file), "utf8").split("\n")
+      .filter(line => /^\s*cp\s/.test(line) && /\/hooks\/"?\s*$/.test(line));
     for (const name of hooks) {
-      assert.ok(copies.includes(`hooks/${name}`), `${file} does not copy hooks/${name}`);
+      assert.ok(copies.some(line => line.split(/\s+/).includes(`hooks/${name}`)), `${file} does not copy hooks/${name} into hooks/`);
+    }
+  }
+});
+
+// The READMEs also list the archive's contents for readers, by hand.
+test("both READMEs list every hook in the release archive's contents", () => {
+  const hooks = fs.readdirSync(path.join(root, "hooks"));
+  for (const [file, heading] of [["README.md", "## Expected Release Install Shape"], ["README.zh-CN.md", "## Release 归档内容"]]) {
+    const text = fs.readFileSync(path.join(root, file), "utf8");
+    const section = text.slice(text.indexOf(heading), text.indexOf("\n## ", text.indexOf(heading) + heading.length));
+    for (const name of hooks) {
+      assert.ok(section.includes(`\`hooks/${name}\``), `${file} does not list hooks/${name}`);
     }
   }
 });

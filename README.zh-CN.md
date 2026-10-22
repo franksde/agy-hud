@@ -48,6 +48,8 @@ agy plugin install .\agy-hud
 /statusline %USERPROFILE%\.gemini\config\plugins\agy-hud\hooks\status-line.cmd
 ```
 
+Windows 上 CLI 通过 `cmd.exe` 运行状态栏,这需要 2026 年年中之后的版本:更早的版本用 `sh -c` 运行,没有 `sh` 就失败([antigravity-cli#344](https://github.com/google-antigravity/antigravity-cli/issues/344))。命令里不要加引号。CLI 会把引号转义成 `\"`,`cmd.exe` 不把它当引号,状态栏于是每次重绘都失败,直到 CLI 把它自动关掉([tightship#89](https://github.com/ATNexusLab/tightship/issues/89))。命令里的路径含空格时(例如 `C:\Users\Jane Doe` 这样的用户目录),改用它的 8.3 短路径,在 `cmd.exe` 里运行 `for %I in ("C:\Users\Jane Doe") do @echo %~sI` 可以得到。
+
 ## 从本地路径安装
 
 不要把 git clone 出来的仓库目录直接传给 `agy plugin install`。该命令会拷贝**整个**目录,于是 `.git/`、`src/`、`test/` 之类全都会被塞进插件目录;而且如果这个 clone 启用了 git fsmonitor,拷贝会直接失败在 `.git/fsmonitor--daemon.ipc` 上——那是一个 socket,不是普通文件。
@@ -135,14 +137,21 @@ mkdir -p ~/.config/agy-hud
 echo '{"show_icons": false}' > ~/.config/agy-hud/config.json   # 文件已存在时请把这个键合并进去
 ```
 
+在 Windows 上用 PowerShell(cmd 没有 `mkdir -p`,Windows PowerShell 5.1 的 `>` 会写成 UTF-16,HUD 读不了):
+
+```powershell
+New-Item -ItemType Directory -Force -Path "~\.config\agy-hud" | Out-Null
+Set-Content -Encoding ascii -Path "~\.config\agy-hud\config.json" -Value '{"show_icons": false}'
+```
+
 HUD 随后以纯文本渲染:`3.8 Flash High | Pro | dev`。
 
 先看 `doctor` 输出里的 `config` 那一行。如果它已经指向某个文件,请改**那一个**:bundle 旁边或插件根目录下的 `config.json` 优先级高于 `~/.config/agy-hud/config.json`(完整顺序见[配置](#配置)),所以在 `~/.config` 下新建的文件会被压住,屏幕上什么都不会变。
 
 **B. 保留图标。** 两步,而且只有第二步才会改变你看到的东西:
 
-1. 装一个 Nerd Font,例如 `brew install --cask font-hack-nerd-font`。
-2. 把终端的字体指向那个字族——iTerm2 → Settings → Profiles → Text → Font、VS Code 的 `terminal.integrated.fontFamily`、`~/.config/ghostty/config` 里的 `font-family`,等等。`doctor` 会针对它识别到的终端打印这个设置的位置。
+1. 装一个 Nerd Font,例如 macOS 上 `brew install --cask font-hack-nerd-font`,Windows 上从 <https://www.nerdfonts.com> 下载 Hack Nerd Font。
+2. 把终端的字体指向那个字族——iTerm2 → Settings → Profiles → Text → Font、VS Code 的 `terminal.integrated.fontFamily`、`~/.config/ghostty/config` 里的 `font-family`、Windows Terminal → Settings → Profiles → Defaults → Appearance → Font face,等等。`doctor` 会针对它识别到的终端打印这个设置的位置。
 
 只装字体不会有任何变化,因为终端仍然用它自己 profile 里写的那个字族来画。
 
@@ -185,11 +194,13 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin <插件根目录>/hooks/status-line.sh < 
 
 在终端里运行 `command -v node` 可以得到这个路径。
 
-在 Windows 上,`hooks/status-line.cmd` 不会自己查找 Node,只运行 CLI 启动它时 `PATH` 里的 `node`。找不到时输出 `agy-hud: node not found on PATH` 并以 127 退出。同样可以把状态栏直接接到 `node.exe` 的完整路径上,路径用终端里 `where node` 的输出:
+在 Windows 上,`hooks/status-line.cmd` 不会自己查找 Node,只运行 CLI 启动它时 `PATH` 里的第一个 `node.exe`,它必须是 Node 18 或更新版本。它从不运行当前目录(也就是你的工作区)里的 node。找不到时输出 `agy-hud: node not found on PATH` 并以 127 退出。同样可以把状态栏直接接到 `node.exe` 的完整路径上,路径用终端里 `where node` 的输出:
 
 ```text
 /statusline <node.exe 的完整路径> <插件根目录>\dist\agy-hud.js statusline
 ```
+
+默认安装位置是 `C:\Program Files\nodejs\node.exe`,其中的空格会让命令断开;请按[从 GitHub Release 安装](#从-github-release-安装)里的说明改用不带引号的 8.3 短路径。
 
 ## 卸载
 
@@ -240,6 +251,8 @@ agy plugin uninstall agy-hud
    echo '{"show_icons": false}' > ~/.config/agy-hud/config.json
    ```
 
+   在 Windows 上改用[图标显示成方块](#图标显示成方块)里的 PowerShell 命令;上面的命令在 cmd 里会失败,在 Windows PowerShell 5.1 里会写出读不了的文件。
+
    如果文件已存在,请把这个键合并进去——读出来、设置 `show_icons`、再写回。不要覆盖用户已经调过的配置。另外,如果 `doctor` 报出的 `configPath` 不是这一个,请改写到它报出的那个路径:bundle 旁边的配置优先级更高,写在这里的文件会被压住。
 
    **除非用户主动要求,否则不要替他装字体。** 那是系统级改动,而且它本身什么都修不好:终端仍然按自己 profile 里写的字族来画,而那个设置无法可靠地脚本化。在 SSH 场景下更是有害无益——字形由他本地机器上的终端绘制,在远端主机装字体不可能改变任何东西。如果他确实想要图标,把[图标显示成方块](#图标显示成方块)里的两步告诉他,第二步交给他自己做。
@@ -254,6 +267,7 @@ agy plugin uninstall agy-hud
      "homedir": "/home/u",
      "nodeVersion": "v22.14.0",
      "nodeOk": true,
+     "platform": "linux",
      "statuslineCommand": "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh",
      "statuslineWired": true,
      "configPath": "/home/u/.config/agy-hud/config.json",
@@ -275,10 +289,10 @@ agy plugin uninstall agy-hud
 
    - `nodeOk: false` —— 运行时低于 18。如实汇报,HUD 跑不起来。
    - `nodeOk` 描述的是运行 `doctor` 的那个 Node,也就是你 shell 的 `PATH` 上的那个。CLI 启动状态栏时的 `PATH` 可能更短。如果 `doctor` 通过而 HUD 仍不出现,请运行[找不到 Node](#找不到-node)里的检查命令。
-   - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`,在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
+   - `statuslineWired: false` —— CLI 并没有在跑这个插件。请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`(`platform` 为 `win32` 时用 `\hooks\status-line.cmd`),在此之前 HUD 不会出现。如果 `statuslineCommand` 有值却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
    - `showIcons` —— 确认第 3 步最终落在了哪种模式。
    - `configInPluginDir: true` —— 当前生效的配置放在插件目录里,Antigravity CLI 1.1.28+ 下一次 `agy plugin install` 就会把它删掉。请告诉用户,征得同意后把它移到 `userConfigPath`:如果那里已有文件就合并进去,然后删除插件目录里的那份——否则它会一直压住新位置的配置,直到某次重装把它悄悄删掉。
-   - `statuslineRunsInstalled: false` —— 状态栏运行的不是 `agy plugin install` 刚写入的那份,这次安装在屏幕上什么都没改变。请让用户运行 `/statusline <installedPlugin.path>/hooks/status-line.sh`。`null` 表示没有可比对的对象:状态栏没有接到 agy-hud(见 `statuslineWired`),或者 `installedPluginStatus` 不是 `found`——Antigravity CLI 1.3.4 之前没有 `agy plugin list --json`,此时为 `unknown`。
+   - `statuslineRunsInstalled: false` —— 状态栏运行的不是 `agy plugin install` 刚写入的那份,这次安装在屏幕上什么都没改变。请让用户运行 `/statusline <installedPlugin.path>/hooks/status-line.sh`,Windows 上用 `.cmd`;不带 `--json` 的 `doctor` 会打印确切的命令。`null` 表示没有可比对的对象:状态栏没有接到 agy-hud(见 `statuslineWired`),或者 `installedPluginStatus` 不是 `found`——Antigravity CLI 1.3.4 之前没有 `agy plugin list --json`,此时为 `unknown`。
    - `nerdFont` —— **只是提示,绝不是判据。** `not-found` 不代表图标坏了,因为 Ghostty、WezTerm、kitty 自带字形回退;`found` 也不代表图标能用,因为终端可能在用另一个字族。绝不要仅凭这个字段就去关图标,或去建议装字体。能定论的证据只有第 2 步用户的回答,或者 `doctor` 普通输出里的那行探针。
 
    不带 `--json` 的 `doctor` 会打印同一份报告外加图标探针,所以对于那些不在 CLI 终端里跟你对话的用户,它也可以充当第 2 步的检查手段。
@@ -289,7 +303,7 @@ GitHub release 会发布一个平台无关归档包:
 
 - `agy-hud.tar.gz`
 
-归档包应包含 `plugin.json`、`hooks/status-line.sh`、`dist/agy-hud.js`、`config.example.json`、`README.md`、`README.zh-CN.md`、`LICENSE`、`THIRD_PARTY_NOTICES.md` 以及相关文档。运行依赖已打包,无需额外安装。
+归档包应包含 `plugin.json`、`hooks/status-line.sh`、`hooks/status-line.cmd`、`dist/agy-hud.js`、`config.example.json`、`README.md`、`README.zh-CN.md`、`LICENSE`、`THIRD_PARTY_NOTICES.md` 以及相关文档。运行依赖已打包,无需额外安装。
 
 ## CLI
 
@@ -463,4 +477,4 @@ npm test
 
 配额字段依赖本地 Antigravity 的可用性以及一份兼容的本地缓存。如果 Antigravity 未运行,或本地 `GetUserStatus` 端点发生变化,HUD 会省略配额细节。
 
-在 Windows 上,`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑;`/usage` 超时被终止时,`agy` 可能启动的辅助进程不会一并结束,因为 Windows 没有进程组。CI 只在 Linux 上运行,Windows 支持是在 Antigravity CLI 1.4.4 上手动验证的。
+在 Windows 上,`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑;`/usage` 超时被终止时,`agy` 可能启动的辅助进程不会一并结束,因为 Windows 没有进程组。CI 只在 Linux 上运行。贡献者提交的 hook 在 Windows 11 + Antigravity CLI 1.4.4 上手动验证过;之后针对 Windows 的改动(`/usage` 路径、doctor 的 Windows 路径、加固后的 hook)有 Linux 和 macOS 上的测试覆盖,但还没有在 Windows 上实际运行过。

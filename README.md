@@ -48,6 +48,8 @@ On Windows:
 /statusline %USERPROFILE%\.gemini\config\plugins\agy-hud\hooks\status-line.cmd
 ```
 
+The CLI runs the status line through `cmd.exe` on Windows, which needs a release from after mid-2026: earlier ones ran it with `sh -c` and failed without a `sh` ([antigravity-cli#344](https://github.com/google-antigravity/antigravity-cli/issues/344)). Do not put quotes in the command. The CLI escapes them to `\"`, which `cmd.exe` does not read as quoting, and the status line then fails on every redraw until the CLI turns it off ([tightship#89](https://github.com/ATNexusLab/tightship/issues/89)). If a path in the command contains a space, as a profile like `C:\Users\Jane Doe` does, use its 8.3 short form instead, which `for %I in ("C:\Users\Jane Doe") do @echo %~sI` prints in `cmd.exe`.
+
 ## Install From Local Path
 
 Do not pass a git clone straight to `agy plugin install`. The command copies the *entire* directory, so it would drag `.git/`, `src/`, `test/`, and everything else into the plugin directory — and if the clone has git's fsmonitor enabled, the copy aborts outright on `.git/fsmonitor--daemon.ipc`, because it is a socket rather than a file.
@@ -135,14 +137,21 @@ mkdir -p ~/.config/agy-hud
 echo '{"show_icons": false}' > ~/.config/agy-hud/config.json   # merge the key if the file already exists
 ```
 
+On Windows, in PowerShell (`mkdir -p` does not exist in cmd, and Windows PowerShell 5.1 writes UTF-16 through `>`, which the HUD cannot read):
+
+```powershell
+New-Item -ItemType Directory -Force -Path "~\.config\agy-hud" | Out-Null
+Set-Content -Encoding ascii -Path "~\.config\agy-hud\config.json" -Value '{"show_icons": false}'
+```
+
 The HUD then renders as plain text: `3.8 Flash High | Pro | dev`.
 
 Check the `config` line in `doctor` output first. If it already names a file, edit **that** one instead: a `config.json` next to the bundle or in the plugin root outranks `~/.config/agy-hud/config.json` (see [Config](#config) for the full order), so a new file under `~/.config` would sit there shadowed while nothing on screen changes.
 
 **B. Keep the icons.** Two steps, and only the second one changes what you see:
 
-1. Install a Nerd Font, for example `brew install --cask font-hack-nerd-font`.
-2. Point the terminal at that family — iTerm2 → Settings → Profiles → Text → Font, VS Code's `terminal.integrated.fontFamily`, `font-family` in `~/.config/ghostty/config`, and so on. `doctor` prints the location for the terminal it detects.
+1. Install a Nerd Font, for example `brew install --cask font-hack-nerd-font` on macOS, or Hack Nerd Font from <https://www.nerdfonts.com> on Windows.
+2. Point the terminal at that family — iTerm2 → Settings → Profiles → Text → Font, VS Code's `terminal.integrated.fontFamily`, `font-family` in `~/.config/ghostty/config`, Windows Terminal → Settings → Profiles → Defaults → Appearance → Font face, and so on. `doctor` prints the location for the terminal it detects.
 
 Installing the font alone changes nothing, because the terminal keeps drawing with whatever family its own profile names.
 
@@ -185,11 +194,13 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin <plugin-root>/hooks/status-line.sh < /dev
 
 `command -v node` in your terminal prints that path.
 
-On Windows, `hooks/status-line.cmd` does no lookup of its own: it runs the `node` on the `PATH` the CLI starts it with. When there is none, it prints `agy-hud: node not found on PATH` and exits 127. Wire the status line to `node.exe` by its full path in the same way, using the path `where node` prints in your terminal:
+On Windows, `hooks/status-line.cmd` does no lookup of its own: it runs the first `node.exe` on the `PATH` the CLI starts it with, which must be Node 18 or newer. It never runs one from the current directory, which is your workspace. When there is none, it prints `agy-hud: node not found on PATH` and exits 127. Wire the status line to `node.exe` by its full path in the same way, using the path `where node` prints in your terminal:
 
 ```text
 /statusline <full path to node.exe> <plugin-root>\dist\agy-hud.js statusline
 ```
+
+The default install is `C:\Program Files\nodejs\node.exe`, whose space breaks the command; use the 8.3 short path described under [Install From GitHub Release](#install-from-github-release), without quotes.
 
 ## Uninstalling
 
@@ -241,6 +252,8 @@ For a genuinely new install:
    echo '{"show_icons": false}' > ~/.config/agy-hud/config.json
    ```
 
+   On Windows, use the PowerShell lines from [Icons Render As Boxes](#icons-render-as-boxes) instead; the commands above fail in cmd and write an unreadable file in Windows PowerShell 5.1.
+
    If the file already exists, merge the key in — read it, set `show_icons`, write it back. Do not overwrite a config the user has already tuned. And if `doctor` reports a `configPath` other than this one, write to that path instead: a config next to the bundle outranks the home one, and a file written here would be shadowed.
 
    **Do not install a font on their behalf unless they ask for it.** It is a system-level change, and on its own it fixes nothing: the terminal keeps drawing with the family named in its own profile, and that setting is not reliably scriptable. Over SSH it is worse than useless, because the glyphs are drawn by the terminal on their local machine and a font installed on the remote host cannot change them. If they do want icons, give them the two steps from [Icons Render As Boxes](#icons-render-as-boxes) and let them do the second one.
@@ -255,6 +268,7 @@ For a genuinely new install:
      "homedir": "/home/u",
      "nodeVersion": "v22.14.0",
      "nodeOk": true,
+     "platform": "linux",
      "statuslineCommand": "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh",
      "statuslineWired": true,
      "configPath": "/home/u/.config/agy-hud/config.json",
@@ -276,10 +290,10 @@ For a genuinely new install:
 
    - `nodeOk: false` — the runtime is older than 18. Report it; the HUD will not run.
    - `nodeOk` describes the Node that ran `doctor`, which is the one on your shell's `PATH`. The CLI may start the status line with a shorter `PATH`. If `doctor` passes and the HUD still does not appear, run the check in [Node Is Not Found](#node-is-not-found).
-   - `statuslineWired: false` — the CLI is not running this plugin. Tell the user to run `/statusline <plugin-root>/hooks/status-line.sh`, because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired means something else owns their status line; say what it is rather than overwriting it.
+   - `statuslineWired: false` — the CLI is not running this plugin. Tell the user to run `/statusline <plugin-root>/hooks/status-line.sh` (`\hooks\status-line.cmd` when `platform` is `win32`), because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired means something else owns their status line; say what it is rather than overwriting it.
    - `showIcons` — confirms which mode step 3 actually landed in.
    - `configInPluginDir: true` — the config in effect lives inside the plugin directory, and the next `agy plugin install` on Antigravity CLI 1.1.28+ deletes it. Tell the user, and with their agreement move it to `userConfigPath`: merge it into any file already there, then remove the plugin-directory copy, which would otherwise keep outranking it until the reinstall silently drops it.
-   - `statuslineRunsInstalled: false` — the status line runs a copy other than the one `agy plugin install` just wrote, so the install changed nothing on screen. Tell the user to run `/statusline <installedPlugin.path>/hooks/status-line.sh`. `null` means there is nothing to compare: the status line is not wired to agy-hud (see `statuslineWired`), or `installedPluginStatus` is not `found` — `unknown` before Antigravity CLI 1.3.4, which added `agy plugin list --json`.
+   - `statuslineRunsInstalled: false` — the status line runs a copy other than the one `agy plugin install` just wrote, so the install changed nothing on screen. Tell the user to run `/statusline <installedPlugin.path>/hooks/status-line.sh`, or the `.cmd` on Windows; plain `doctor` prints the exact command. `null` means there is nothing to compare: the status line is not wired to agy-hud (see `statuslineWired`), or `installedPluginStatus` is not `found` — `unknown` before Antigravity CLI 1.3.4, which added `agy plugin list --json`.
    - `nerdFont` — **a hint, never a decision.** `not-found` does not mean the icons are broken, because Ghostty, WezTerm and kitty ship their own glyph fallback. `found` does not mean they work either, because the terminal may draw with a different family. Never turn icons off, and never propose a font install, on the strength of this field alone. The user's answer in step 2, or the probe printed by plain `doctor`, is the only evidence that settles it.
 
    Plain `doctor`, without `--json`, prints the same report plus the icon probe, so it also serves as the step 2 check for a user who was reading you somewhere other than their CLI terminal.
@@ -290,7 +304,7 @@ GitHub releases are expected to publish one platform-independent archive:
 
 - `agy-hud.tar.gz`
 
-The archive should contain `plugin.json`, `hooks/status-line.sh`, `dist/agy-hud.js`, `config.example.json`, `README.md`, `README.zh-CN.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and supporting docs. Runtime dependencies are bundled, so no extra installation is required.
+The archive should contain `plugin.json`, `hooks/status-line.sh`, `hooks/status-line.cmd`, `dist/agy-hud.js`, `config.example.json`, `README.md`, `README.zh-CN.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and supporting docs. Runtime dependencies are bundled, so no extra installation is required.
 
 ## CLI
 
@@ -466,4 +480,4 @@ npm test
 
 Quota fields depend on local Antigravity availability and a compatible local cache. If Antigravity is not running, or its local `GetUserStatus` endpoint changes, the HUD omits quota details.
 
-On Windows, `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found), and a `/usage` run that times out is killed without the helpers `agy` may have started, since Windows has no process groups. CI runs on Linux only; Windows support was verified by hand on Antigravity CLI 1.4.4.
+On Windows, `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found), and a `/usage` run that times out is killed without the helpers `agy` may have started, since Windows has no process groups. CI runs on Linux only. The contributed hook was verified by hand on Windows 11 with Antigravity CLI 1.4.4; the later changes for Windows (the `/usage` route, doctor's Windows paths and the hardened hook) are covered by tests on Linux and macOS but have not yet been run on Windows.
