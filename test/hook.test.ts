@@ -397,9 +397,9 @@ test("every hook is copied into hooks/ by the release workflow and both READMEs'
   const hooks = fs.readdirSync(path.join(root, "hooks"));
   assert.ok(hooks.includes("status-line.sh") && hooks.includes("status-line.cmd"));
   for (const file of [".github/workflows/release.yml", "README.md", "README.zh-CN.md"]) {
-    // A copy counts only when its last argument, the destination, is the staged plugin's hooks/.
+    // A copy counts only when its last argument, the destination, is hooks/ in the staged plugin root.
     const copies = fs.readFileSync(path.join(root, file), "utf8").split("\n")
-      .filter(line => /^\s*cp\s/.test(line) && /\/hooks\/"?\s*$/.test(line));
+      .filter(line => /^\s*cp\s/.test(line) && /\s"?(\$stage|release\/\$\{package\})\/hooks\/"?\s*$/.test(line));
     for (const name of hooks) {
       assert.ok(copies.some(line => line.split(/\s+/).includes(`hooks/${name}`)), `${file} does not copy hooks/${name} into hooks/`);
     }
@@ -422,14 +422,35 @@ test("both READMEs list every hook in the release archive's contents", () => {
 // in the user's workspace, so a node.bat, where.exe or more.com that a repository ships would run on
 // every redraw. No cmd.exe here to run the hook, so its text is checked: every program is reached by a
 // full path or through %~$PATH:, which searches PATH alone.
-test("status-line.cmd never runs a program by a bare name", () => {
-  const lines = fs.readFileSync(path.join(root, "hooks", "status-line.cmd"), "utf8").split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(line => line !== "" && !/^(rem\b|echo\b|@echo off$|setlocal$)/i.test(line));
-  for (const line of lines) {
-    assert.doesNotMatch(line, /(^|[\s(&|'])(node|where|more)(\.exe|\.com)?(\s|$|')/i, line);
+function bareProgramRuns(script: string): string[] {
+  const commands = script.split(/\r?\n/)
+    // A line can hold several commands joined by & && | ||; >&2 is a redirection, not a join.
+    .flatMap(line => line.split(/(?<!>)&&?|\|\|?/))
+    .map(command => command.trim().replace(/^[@(]\s*/, ""))
+    .filter(command => command !== "" && !/^(rem\b|::|echo\b|setlocal$|\)$)/i.test(command));
+  // The for loop names node.exe as the word %~$PATH: looks up; that is not a run.
+  return commands.filter(command => {
+    const scanned = command.replace(/\bin \(node\.exe\)/i, "");
+    return /(^|[^\w%\\.-])(node|where|more)(\.(exe|com|cmd|bat))?(?![\w.-])/i.test(scanned) ||
+      /(^|[\s"'(=])\.\.?[\\/]/.test(scanned);
+  });
+}
+
+test("the bare-name check catches the forms a bare run can take", () => {
+  for (const bad of ["node x", "@node x", "node.cmd x", "node.bat x", "node>nul", 'call "node" x', "start node",
+    "echo x & node x", "where node", ".\\node.exe x", "for /f %%i in ('more') do rem", "(node x)"]) {
+    assert.deepEqual(bareProgramRuns(bad), [bad.replace(/^[@(]\s*/, "").replace(/^echo x & /, "")], bad);
   }
-  assert.ok(lines.some(line => /%%~\$PATH:\w/.test(line)), "node must be resolved through %~$PATH:");
+  for (const fine of ["@rem node", ":: node", "echo node not found>&2", '"%SystemRoot%\\System32\\more.com" >nul',
+    'set "AGY_HUD_NODE="', 'for %%i in (node.exe) do set "AGY_HUD_NODE=%%~$PATH:i"', '"%AGY_HUD_NODE%" "%~dp0..\\dist\\agy-hud.js" statusline']) {
+    assert.deepEqual(bareProgramRuns(fine), [], fine);
+  }
+});
+
+test("status-line.cmd never runs a program by a bare name", () => {
+  const script = fs.readFileSync(path.join(root, "hooks", "status-line.cmd"), "utf8");
+  assert.deepEqual(bareProgramRuns(script), []);
+  assert.match(script, /%%~\$PATH:\w/, "node must be resolved through %~$PATH:");
 });
 
 // cmd.exe misparses some batch files with bare LF line endings, so the hook is checked out with CRLF
