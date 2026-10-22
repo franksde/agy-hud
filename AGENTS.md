@@ -167,7 +167,7 @@ Linux. Rules that are easy to break from macOS:
 - **Every file in `hooks/` must be in the release archive and in both READMEs' staging steps.**
   These lists are written by hand; `test/hook.test.ts` checks them.
 - **No bare program names in `status-line.cmd`.** cmd.exe searches the current directory, the
-  user's workspace, before PATH. Find node with `%%~$PATH:`, which searches PATH alone, and name
+  user's workspace, before PATH. Find node with `%%~$PATH:`, which searches PATH alone (a `.` in PATH still counts), and name
   every other program by its full path; `test/hook.test.ts` checks the text.
 - **No quotes in a `/statusline` command on Windows.** The CLI escapes them to `\"`, which cmd.exe
   does not read (tightship#89); a path with a space takes its 8.3 short form.

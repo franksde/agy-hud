@@ -48,7 +48,7 @@ On Windows:
 /statusline %USERPROFILE%\.gemini\config\plugins\agy-hud\hooks\status-line.cmd
 ```
 
-The CLI runs the status line through `cmd.exe` on Windows, which needs a release from after mid-2026: earlier ones ran it with `sh -c` and failed without a `sh` ([antigravity-cli#344](https://github.com/google-antigravity/antigravity-cli/issues/344)). Do not put quotes in the command. The CLI escapes them to `\"`, which `cmd.exe` does not read as quoting, and the status line then fails on every redraw until the CLI turns it off ([tightship#89](https://github.com/ATNexusLab/tightship/issues/89)). If a path in the command contains a space, as a profile like `C:\Users\Jane Doe` does, use its 8.3 short form instead, which `for %I in ("C:\Users\Jane Doe") do @echo %~sI` prints in `cmd.exe`.
+The CLI runs the status line through `cmd.exe` on Windows, which earlier releases did not: they ran it with `sh -c` and failed without a `sh` ([antigravity-cli#344](https://github.com/google-antigravity/antigravity-cli/issues/344), closed on 2026-07-11; the CLI changelog does not name the release, and the first one after that date is 1.1.2). Do not put quotes in the command. The CLI escapes them to `\"`, which `cmd.exe` does not read as quoting, and the status line then fails on every redraw until the CLI turns it off ([tightship#89](https://github.com/ATNexusLab/tightship/issues/89)). If a path in the command contains a space, as a profile like `C:\Users\Jane Doe` does (and then `%USERPROFILE%` too), use its 8.3 short form instead, which `for %I in ("C:\Users\Jane Doe") do @echo %~sI` prints in `cmd.exe`. That needs 8.3 names on the volume, which Windows can turn off; the command prints the long path unchanged then.
 
 ## Install From Local Path
 
@@ -194,7 +194,7 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin <plugin-root>/hooks/status-line.sh < /dev
 
 `command -v node` in your terminal prints that path.
 
-On Windows, `hooks/status-line.cmd` does no lookup of its own: it runs the first `node.exe` on the `PATH` the CLI starts it with, which must be Node 18 or newer. It never runs one from the current directory, which is your workspace. When there is none, it prints `agy-hud: node not found on PATH` and exits 127. Wire the status line to `node.exe` by its full path in the same way, using the path `where node` prints in your terminal:
+On Windows, `hooks/status-line.cmd` does no lookup of its own: it runs the first `node.exe` on the `PATH` the CLI starts it with, which must be Node 18 or newer. A `node.cmd` shim without a `node.exe` next to it is not used. Unlike a bare command in `cmd.exe`, the lookup skips the current directory, which is your workspace, unless `PATH` itself lists it as `.` or another relative entry. When there is none, it prints `agy-hud: node not found on PATH` and exits 127. Wire the status line to `node.exe` by its full path in the same way. `(Get-Command node.exe).Source` in PowerShell prints that path; `where node` in `cmd.exe` looks in the current directory first, so run it from a directory you trust:
 
 ```text
 /statusline <full path to node.exe> <plugin-root>\dist\agy-hud.js statusline
@@ -480,4 +480,4 @@ npm test
 
 Quota fields depend on local Antigravity availability and a compatible local cache. If Antigravity is not running, or its local `GetUserStatus` endpoint changes, the HUD omits quota details.
 
-On Windows, `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found), and a `/usage` run that times out is killed without the helpers `agy` may have started, since Windows has no process groups. CI runs on Linux only. The contributed hook was verified by hand on Windows 11 with Antigravity CLI 1.4.4; the later changes for Windows (the `/usage` route, doctor's Windows paths and the hardened hook) are covered by tests on Linux and macOS but have not yet been run on Windows.
+On Windows, `doctor` compares paths as text, so a status line wired through an 8.3 short path reads as a copy other than the installed one. `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found), and a `/usage` run that times out is killed without the helpers `agy` may have started, since Windows has no process groups. CI runs on Linux only. The contributed hook was verified by hand on Windows 11 with Antigravity CLI 1.4.4; the later changes for Windows (the `/usage` route, doctor's Windows paths and the hardened hook) are covered by tests on Linux and macOS but have not yet been run on Windows.

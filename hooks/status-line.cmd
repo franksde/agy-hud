@@ -14,7 +14,7 @@ if "%AGY_HUD_NESTED%"=="1" (
   exit /b 0
 )
 
-rem %%~$PATH:i searches the PATH directories only, never the current one.
+rem %%~$PATH:i searches the PATH directories only, not the current one first.
 set "AGY_HUD_NODE="
 for %%i in (node.exe) do set "AGY_HUD_NODE=%%~$PATH:i"
 if not defined AGY_HUD_NODE (

@@ -48,7 +48,7 @@ agy plugin install .\agy-hud
 /statusline %USERPROFILE%\.gemini\config\plugins\agy-hud\hooks\status-line.cmd
 ```
 
-Windows 上 CLI 通过 `cmd.exe` 运行状态栏,这需要 2026 年年中之后的版本:更早的版本用 `sh -c` 运行,没有 `sh` 就失败([antigravity-cli#344](https://github.com/google-antigravity/antigravity-cli/issues/344))。命令里不要加引号。CLI 会把引号转义成 `\"`,`cmd.exe` 不把它当引号,状态栏于是每次重绘都失败,直到 CLI 把它自动关掉([tightship#89](https://github.com/ATNexusLab/tightship/issues/89))。命令里的路径含空格时(例如 `C:\Users\Jane Doe` 这样的用户目录),改用它的 8.3 短路径,在 `cmd.exe` 里运行 `for %I in ("C:\Users\Jane Doe") do @echo %~sI` 可以得到。
+Windows 上 CLI 通过 `cmd.exe` 运行状态栏,更早的版本做不到:它们用 `sh -c` 运行,没有 `sh` 就失败([antigravity-cli#344](https://github.com/google-antigravity/antigravity-cli/issues/344),2026-07-11 关闭;CLI 的 changelog 没有写明是哪个版本修的,这之后的第一个版本是 1.1.2)。命令里不要加引号。CLI 会把引号转义成 `\"`,`cmd.exe` 不把它当引号,状态栏于是每次重绘都失败,直到 CLI 把它自动关掉([tightship#89](https://github.com/ATNexusLab/tightship/issues/89))。命令里的路径含空格时(例如 `C:\Users\Jane Doe` 这样的用户目录),改用它的 8.3 短路径(这时 `%USERPROFILE%` 也一样),在 `cmd.exe` 里运行 `for %I in ("C:\Users\Jane Doe") do @echo %~sI` 可以得到。这要求所在卷启用了 8.3 短名,Windows 可以关闭它,此时这条命令会原样打印长路径。
 
 ## 从本地路径安装
 
@@ -194,7 +194,7 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin <插件根目录>/hooks/status-line.sh < 
 
 在终端里运行 `command -v node` 可以得到这个路径。
 
-在 Windows 上,`hooks/status-line.cmd` 不会自己查找 Node,只运行 CLI 启动它时 `PATH` 里的第一个 `node.exe`,它必须是 Node 18 或更新版本。它从不运行当前目录(也就是你的工作区)里的 node。找不到时输出 `agy-hud: node not found on PATH` 并以 127 退出。同样可以把状态栏直接接到 `node.exe` 的完整路径上,路径用终端里 `where node` 的输出:
+在 Windows 上,`hooks/status-line.cmd` 不会自己查找 Node,只运行 CLI 启动它时 `PATH` 里的第一个 `node.exe`,它必须是 Node 18 或更新版本。只有 `node.cmd` shim、旁边没有 `node.exe` 的不会被使用。与 `cmd.exe` 里的裸命令不同,这次查找跳过当前目录(也就是你的工作区),除非 `PATH` 本身以 `.` 或其他相对路径列出了它。找不到时输出 `agy-hud: node not found on PATH` 并以 127 退出。同样可以把状态栏直接接到 `node.exe` 的完整路径上。PowerShell 里 `(Get-Command node.exe).Source` 会打印这个路径;`cmd.exe` 里的 `where node` 会先查当前目录,请在可信的目录里运行它:
 
 ```text
 /statusline <node.exe 的完整路径> <插件根目录>\dist\agy-hud.js statusline
@@ -477,4 +477,4 @@ npm test
 
 配额字段依赖本地 Antigravity 的可用性以及一份兼容的本地缓存。如果 Antigravity 未运行,或本地 `GetUserStatus` 端点发生变化,HUD 会省略配额细节。
 
-在 Windows 上,`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑;`/usage` 超时被终止时,`agy` 可能启动的辅助进程不会一并结束,因为 Windows 没有进程组。CI 只在 Linux 上运行。贡献者提交的 hook 在 Windows 11 + Antigravity CLI 1.4.4 上手动验证过;之后针对 Windows 的改动(`/usage` 路径、doctor 的 Windows 路径、加固后的 hook)有 Linux 和 macOS 上的测试覆盖,但还没有在 Windows 上实际运行过。
+在 Windows 上,`doctor` 按文本比较路径,所以用 8.3 短路径接入的状态栏会被当成已安装目录之外的另一份拷贝。`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑;`/usage` 超时被终止时,`agy` 可能启动的辅助进程不会一并结束,因为 Windows 没有进程组。CI 只在 Linux 上运行。贡献者提交的 hook 在 Windows 11 + Antigravity CLI 1.4.4 上手动验证过;之后针对 Windows 的改动(`/usage` 路径、doctor 的 Windows 路径、加固后的 hook)有 Linux 和 macOS 上的测试覆盖,但还没有在 Windows 上实际运行过。
