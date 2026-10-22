@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added Windows support (#17, by @avometre): `hooks/status-line.cmd` starts the bundle with the `node` on `PATH`, exits without starting Node inside the nested `agy -p /usage` run, and exits 127 when there is no `node`. It does not search version-manager directories as `hooks/status-line.sh` does. The release archive now ships it, checked out with CRLF line endings, and both READMEs give the Windows `/statusline` and install commands.
+- On Windows, quota refreshes go straight to `/usage`. Finding the loopback server takes `ps` and `lsof`, which Windows does not have; the missing `ps` used to fail every refresh before the `/usage` fallback could run, leaving only the payload quota. The detached refresh and the `agy` it starts no longer open a console window there.
+- `doctor` on Windows compares the status-line command with the installed plugin regardless of separators and case and with `%USERPROFILE%` or `~` expanded, abbreviates `C:\Users\<name>\` to `~\`, and gives a rewire command with backslashes. It scans the system and per-user font folders, recognises Windows Terminal and names its font setting, and gives the icons-off fix as PowerShell that writes plain ASCII, because `mkdir -p` fails in cmd and Windows PowerShell 5.1 writes UTF-16 through `>`.
+
 ## 0.1.13 — 2026-10-15
 
 - Added `show_mode`, on by default, to show the agent mode Antigravity CLI 1.3.5 cycles with `Shift+Tab` (`cycle_mode` in the payload): `Plan`, `Accept Edits` or `Auto`, closing the model segment before the directory. It sits with the model and plan because it is a session setting, away from the agent state that changes every turn. The default mode shows nothing, so the line is unchanged there. The CLI's prompt placeholder drops the mode as soon as you type, and a custom status line replaces the built-in one that keeps it, so without this agy-hud users had no persistent indicator. An unknown mode is shown only when it is a plain identifier.

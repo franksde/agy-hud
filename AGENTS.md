@@ -156,6 +156,23 @@ that are easy to undo by accident:
   not-found branch can be reached on a machine that has a system node. It is not a user setting
   and stays out of the READMEs.
 
+## Windows
+
+Windows support came from PR #17 and is verified by hand on a Windows machine only; CI runs on
+Linux. Rules that are easy to break from macOS:
+
+- **`hooks/status-line.cmd` is CRLF.** `.gitattributes` checks it out that way on every platform,
+  the Linux release runner included, and `test/hook.test.ts` fails if it is not. Edit it with an
+  editor that keeps CRLF.
+- **Every file in `hooks/` must be in the release archive and in both READMEs' staging steps.**
+  These lists are written by hand; `test/hook.test.ts` checks them.
+- **No loopback probe on Windows.** `refreshQuota` reports the loopback as refused there without
+  running `ps` or `lsof`, which do not exist, so refreshes take the `/usage` route with its pacing.
+- **Detached children need `windowsHide: true`,** or each refresh opens a console window.
+- **doctor paths go through the platform.** Compare with `fold` in `runsInstalledCopy`, shorten
+  with `abbreviate`, join with `separator`. A template string with `/` produces mixed separators
+  on Windows that neither the comparison nor the abbreviation matches.
+
 ## Release And CI
 
 - CI expects `npm test` to pass.

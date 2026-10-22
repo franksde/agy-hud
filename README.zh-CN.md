@@ -28,6 +28,14 @@ tar -xzf agy-hud.tar.gz
 agy plugin install ./agy-hud
 ```
 
+在 Windows 上,Windows PowerShell 把 `curl` 作为 `Invoke-WebRequest` 的别名,不认这些参数,所以要调用 `curl.exe`(Windows 10 及以上自带它和 `tar`):
+
+```powershell
+curl.exe -fsSL -o agy-hud.tar.gz https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
+tar -xzf agy-hud.tar.gz
+agy plugin install .\agy-hud
+```
+
 解压出的目录就是一个完整的插件(包含 `plugin.json`、`hooks/`、`dist/`),可以直接传给 `agy plugin install`。它需要 Node.js 18+,解压后不需要再运行 `npm install`。
 
 **重要：安装完成后，请在你的 Antigravity CLI 交互式命令行内运行以下命令来启用状态栏：**
@@ -176,6 +184,12 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin <插件根目录>/hooks/status-line.sh < 
 ```
 
 在终端里运行 `command -v node` 可以得到这个路径。
+
+在 Windows 上,`hooks/status-line.cmd` 不会自己查找 Node,只运行 CLI 启动它时 `PATH` 里的 `node`。找不到时输出 `agy-hud: node not found on PATH` 并以 127 退出。同样可以把状态栏直接接到 `node.exe` 的完整路径上,路径用终端里 `where node` 的输出:
+
+```text
+/statusline <node.exe 的完整路径> <插件根目录>\dist\agy-hud.js statusline
+```
 
 ## 卸载
 
@@ -375,6 +389,8 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11、1.2.14、1.2.16 和 1.3.5 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
 
+Windows 上没有查找 loopback 服务所需的 `ps` 和 `lsof`,所以 `quota refresh` 一开始就按 loopback 被拒处理,直接走 `/usage`,节流和退避与下文相同。
+
 在这样的 CLI 上,`quota refresh` 会改用官方只读命令 `agy -p /usage --output-format json`。它不启动 agent turn,不消耗 token 或配额,但会另起一个短暂的 `agy` 进程:约 7 秒,大部分时间在等 Google 的接口,CPU 约 1 秒,瞬时内存约 160 MB。HUD 从不在重绘时同步执行它,只在后台执行,并按下面的节奏:
 
 | 时机 | 缓存超过多久才执行 |
@@ -446,3 +462,5 @@ npm test
 ## 限制说明
 
 配额字段依赖本地 Antigravity 的可用性以及一份兼容的本地缓存。如果 Antigravity 未运行,或本地 `GetUserStatus` 端点发生变化,HUD 会省略配额细节。
+
+在 Windows 上,`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑;`/usage` 超时被终止时,`agy` 可能启动的辅助进程不会一并结束,因为 Windows 没有进程组。CI 只在 Linux 上运行,Windows 支持是在 Antigravity CLI 1.4.4 上手动验证的。

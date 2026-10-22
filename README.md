@@ -28,6 +28,14 @@ tar -xzf agy-hud.tar.gz
 agy plugin install ./agy-hud
 ```
 
+On Windows, Windows PowerShell aliases `curl` to `Invoke-WebRequest`, which does not take these flags, so call `curl.exe` (Windows 10 and later ship it, and `tar`):
+
+```powershell
+curl.exe -fsSL -o agy-hud.tar.gz https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz
+tar -xzf agy-hud.tar.gz
+agy plugin install .\agy-hud
+```
+
 The extracted directory is a complete plugin (`plugin.json`, `hooks/`, `dist/`), so it can be passed straight to `agy plugin install`. It runs with Node.js 18+ and does not require `npm install` after extraction.
 
 **Important: After installation, you must run the following slash command inside your Antigravity CLI to enable the HUD:**
@@ -176,6 +184,12 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin <plugin-root>/hooks/status-line.sh < /dev
 ```
 
 `command -v node` in your terminal prints that path.
+
+On Windows, `hooks/status-line.cmd` does no lookup of its own: it runs the `node` on the `PATH` the CLI starts it with. When there is none, it prints `agy-hud: node not found on PATH` and exits 127. Wire the status line to `node.exe` by its full path in the same way, using the path `where node` prints in your terminal:
+
+```text
+/statusline <full path to node.exe> <plugin-root>\dist\agy-hud.js statusline
+```
 
 ## Uninstalling
 
@@ -378,6 +392,8 @@ Since 0.1.9, quota refreshes can reuse `quota_cache.json.server.json` next to th
 
 From Antigravity CLI 1.2.2 on (boundary measured by [CodexBar](https://github.com/steipete/CodexBar/pull/3685); verified here on 1.2.11, 1.2.14, 1.2.16 and 1.3.5), the `agy` loopback server answers `GetUserStatus` with `401 missing CSRF token`, and the CLI does not give the status-line command that token. The status-line payload still carries the official quota, but it lags: during a turn it does not move at all, and a turn's usage booked after the CLI's end-of-turn fetch stays invisible until the next turn ends. Measured on 1.2.11, an idle session showed a 5h value 25 minutes out of date.
 
+Windows has neither `ps` nor `lsof`, which finding the loopback server takes, so there `quota refresh` treats the loopback as refused from the start and goes straight to `/usage`, paced and backed off as below.
+
 On such a CLI, `quota refresh` falls back to the official read-only command `agy -p /usage --output-format json`. It starts no agent turn and spends no tokens or quota, but it does start a separate, short-lived `agy` process: about 7 s, most of it waiting on Google's API, about 1 s of CPU and a transient 160 MB. The HUD never runs it during a redraw, only in the background, and paces it:
 
 | When | Runs if the cache is older than |
@@ -449,3 +465,5 @@ npm test
 ## Limitations
 
 Quota fields depend on local Antigravity availability and a compatible local cache. If Antigravity is not running, or its local `GetUserStatus` endpoint changes, the HUD omits quota details.
+
+On Windows, `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found), and a `/usage` run that times out is killed without the helpers `agy` may have started, since Windows has no process groups. CI runs on Linux only; Windows support was verified by hand on Antigravity CLI 1.4.4.
