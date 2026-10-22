@@ -333,9 +333,13 @@ function withIcon(config: Config, icon: string, fallback: string): string {
 function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, officialQuota: Record<string, OfficialQuotaBucket> | undefined, now: Date): QuotaDisplay {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now), modelDisplay);
-    if (merged !== null) {
-      return merged;
+    // Which buckets apply is the plan's call, and a payload with quota states it for this session; a
+    // cache read under another plan must not decide it. Without payload quota the cache is all there is.
+    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now);
+    const plan = officialQuota && Object.keys(officialQuota).length > 0 ? officialQuota : merged;
+    const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
+    if (mergedInfo !== null) {
+      return mergedInfo;
     }
   }
   const cacheInfo = cacheQuotaInfo(cache, modelDisplay);
@@ -423,11 +427,16 @@ function cacheIsFresh(cache: Cache | null | undefined, now: Date): boolean {
   return now.getTime() - cacheTime.getTime() <= 5 * 60 * 1000;
 }
 
-function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | undefined, modelDisplay: string): QuotaDisplay | null {
+// `plan` is the reading that decides which buckets apply to the model; it defaults to the buckets read.
+function officialQuotaInfo(
+  officialQuota: Record<string, OfficialQuotaBucket> | undefined,
+  modelDisplay: string,
+  plan: Record<string, OfficialQuotaBucket> | undefined = officialQuota
+): QuotaDisplay | null {
   if (!officialQuota) {
     return null;
   }
-  const keys = officialQuotaKeys(modelDisplay, officialQuota);
+  const keys = officialQuotaKeys(modelDisplay, plan ?? officialQuota);
   const buckets: QuotaWindowDisplay[] = [];
   let sawKnownBucket = false;
   for (const { key, label } of keys) {

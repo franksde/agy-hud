@@ -261,16 +261,36 @@ test("Gemini 4 Argon falls back to the Gemini buckets when it has no bucket of i
   assert.match(usage, /42%.*81%/);
 });
 
-test("Gemini 4 Argon reads its weekly bucket from a usage cache", () => {
+test("Gemini 4 Argon reads its weekly bucket from a usage cache when the payload has no quota", () => {
   const payload = fixturePayload();
   payload.model = { display_name: "Gemini 4 Argon (Medium)" };
-  payload.quota = { "gemini-5h": { remaining_fraction: 1, reset_time: fiveHourReset } };
+  payload.quota = undefined;
   const config = defaultConfig();
   config.color = false;
   const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {},
     quota: { "gemini-argon-wtu-weekly": { remaining_fraction: 0.25, reset_time: weeklyReset } } };
   const out = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") }));
   assert.match(out, /Usage \S+ 25% left ↻ Reset 3d 21h/);
+});
+
+// Whether Argon has a bucket of its own is a fact about the plan, and the payload states it for the
+// current session. A /usage cache read on a Pro plan must not keep Argon off the Gemini buckets once
+// the payload, as on an Ultra plan, carries none.
+test("an Argon bucket only in the usage cache does not override a payload without one", () => {
+  const payload = fixturePayload();
+  payload.terminal_width = 180;
+  payload.model = { display_name: "Gemini 4 Argon (Medium)" };
+  payload.quota = {
+    "gemini-5h": { remaining_fraction: 0.7, reset_time: fiveHourReset, reset_in_seconds: 16151 },
+    "gemini-weekly": { remaining_fraction: 0.8, reset_time: weeklyReset, reset_in_seconds: 336547 }
+  };
+  const config = defaultConfig();
+  config.color = false;
+  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {},
+    quota: { "gemini-argon-wtu-weekly": { remaining_fraction: 0, reset_time: weeklyReset } } };
+  const line = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") })).split("\n")[1];
+  assert.match(line, /70%.*80%/);
+  assert.doesNotMatch(line, /0% left/);
 });
 
 test("Gemini models other than Argon ignore the Argon bucket", () => {

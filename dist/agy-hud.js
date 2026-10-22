@@ -1030,9 +1030,11 @@ function withIcon(config, icon, fallback) {
 function quotaInfo(cache, modelDisplay, officialQuota, now) {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    const merged = officialQuotaInfo(mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now), modelDisplay);
-    if (merged !== null) {
-      return merged;
+    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now);
+    const plan = officialQuota && Object.keys(officialQuota).length > 0 ? officialQuota : merged;
+    const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
+    if (mergedInfo !== null) {
+      return mergedInfo;
     }
   }
   const cacheInfo = cacheQuotaInfo(cache, modelDisplay);
@@ -1101,11 +1103,11 @@ function cacheIsFresh(cache, now) {
   }
   return now.getTime() - cacheTime.getTime() <= 5 * 60 * 1e3;
 }
-function officialQuotaInfo(officialQuota, modelDisplay) {
+function officialQuotaInfo(officialQuota, modelDisplay, plan = officialQuota) {
   if (!officialQuota) {
     return null;
   }
-  const keys = officialQuotaKeys(modelDisplay, officialQuota);
+  const keys = officialQuotaKeys(modelDisplay, plan ?? officialQuota);
   const buckets = [];
   let sawKnownBucket = false;
   for (const { key, label } of keys) {
