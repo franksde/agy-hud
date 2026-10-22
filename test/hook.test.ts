@@ -422,16 +422,41 @@ test("both READMEs list every hook in the release archive's contents", () => {
 // in the user's workspace, so a node.bat, where.exe or more.com that a repository ships would run on
 // every redraw. No cmd.exe here to run the hook, so its text is checked: every program is reached by a
 // full path or through %~$PATH:, which searches PATH alone.
-function bareProgramRuns(script: string): string[] {
-  const commands = script.split(/\r?\n/)
-    // A line can hold several commands joined by & && | ||; >&2 is a redirection, not a join.
-    .flatMap(line => line.split(/(?<!>)&&?|\|\|?/))
+// The commands of a batch script, comments and echoed text left out. A line can hold several joined
+// by & && | ||, but not where the operator is escaped with ^, quoted, or part of a redirection (>&2).
+function cmdCommands(script: string): string[] {
+  const commands: string[] = [];
+  for (const line of script.split(/\r?\n/)) {
+    let current = "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      if (char === "^" && !quoted && i + 1 < line.length) {
+        current += char + line[i + 1];
+        i += 1;
+      } else if (char === '"') {
+        quoted = !quoted;
+        current += char;
+      } else if ((char === "&" || char === "|") && !quoted && line[i - 1] !== ">") {
+        commands.push(current);
+        current = "";
+        if (line[i + 1] === char) i += 1;
+      } else {
+        current += char;
+      }
+    }
+    commands.push(current);
+  }
+  return commands
     .map(command => command.trim().replace(/^[@(]\s*/, ""))
     .filter(command => command !== "" && !/^(rem\b|::|echo\b|setlocal$|\)$)/i.test(command));
+}
+
+function bareProgramRuns(script: string): string[] {
   // The for loop names node.exe as the word %~$PATH: looks up; that is not a run.
-  return commands.filter(command => {
+  return cmdCommands(script).filter(command => {
     const scanned = command.replace(/\bin \(node\.exe\)/i, "");
-    return /(^|[^\w%\\.-])(node|where|more)(\.(exe|com|cmd|bat))?(?![\w.-])/i.test(scanned) ||
+    return /(^|[^\w%\\/.-])(node|where|more)(\.(exe|com|cmd|bat))?(?![\w.-])/i.test(scanned) ||
       /(^|[\s"'(=])\.\.?[\\/]/.test(scanned);
   });
 }
@@ -441,7 +466,8 @@ test("the bare-name check catches the forms a bare run can take", () => {
     "echo x & node x", "where node", ".\\node.exe x", "for /f %%i in ('more') do rem", "(node x)"]) {
     assert.deepEqual(bareProgramRuns(bad), [bad.replace(/^[@(]\s*/, "").replace(/^echo x & /, "")], bad);
   }
-  for (const fine of ["@rem node", ":: node", "echo node not found>&2", '"%SystemRoot%\\System32\\more.com" >nul',
+  for (const fine of ["@rem node", ":: node", "echo node not found>&2", "echo a ^& node", 'echo "a & node"', "x 2>&1",
+    '"C:/Program Files/nodejs/node.exe" x', '"%SystemRoot%\\System32\\more.com" >nul',
     'set "AGY_HUD_NODE="', 'for %%i in (node.exe) do set "AGY_HUD_NODE=%%~$PATH:i"', '"%AGY_HUD_NODE%" "%~dp0..\\dist\\agy-hud.js" statusline']) {
     assert.deepEqual(bareProgramRuns(fine), [], fine);
   }
@@ -450,7 +476,9 @@ test("the bare-name check catches the forms a bare run can take", () => {
 test("status-line.cmd never runs a program by a bare name", () => {
   const script = fs.readFileSync(path.join(root, "hooks", "status-line.cmd"), "utf8");
   assert.deepEqual(bareProgramRuns(script), []);
-  assert.match(script, /%%~\$PATH:\w/, "node must be resolved through %~$PATH:");
+  // Checked on the commands, so a comment that mentions the lookup cannot stand in for it.
+  assert.ok(cmdCommands(script).some(command => /^for %%(\w) in \(node\.exe\) do set "AGY_HUD_NODE=%%~\$PATH:\1"$/i.test(command)),
+    "node must be resolved through %~$PATH:");
 });
 
 // cmd.exe misparses some batch files with bare LF line endings, so the hook is checked out with CRLF
