@@ -375,7 +375,7 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 
 ## 配额缓存
 
-在 Antigravity CLI 1.0.8 及更新版本中,`agy-hud` 会优先读取 status-line payload 里的官方 `quota` 对象。如果 payload 同时包含 5 小时和周两个窗口,HUD 会按顺序分别显示,不再折叠成一个容易误解的数字。Gemini 模型读 Gemini 的配额桶,Claude 和 GPT-OSS 读第三方模型的配额桶。Pro 套餐下 Gemini 4 Argon 有单独的周额度(Antigravity CLI 1.4.x,`gemini-argon-wtu-weekly`),没有 5 小时额度,所以只显示这一个窗口;payload 里没有 Argon 配额桶时(例如 Ultra 套餐),读 Gemini 的配额桶。如果这个官方 bucket 仍然看起来完全未消耗,但新鲜的 active-model 缓存已经显示有消耗,`agy-hud` 会使用新鲜缓存,避免显示过期的 `100% left`。旧版 CLI 或没有官方配额数据的 payload,会回退到本地配额缓存。默认缓存路径为:
+在 Antigravity CLI 1.0.8 及更新版本中,`agy-hud` 会优先读取 status-line payload 里的官方 `quota` 对象。如果 payload 同时包含 5 小时和周两个窗口,HUD 会按顺序分别显示,不再折叠成一个容易误解的数字。Gemini 模型读 Gemini 的配额桶,Claude 和 GPT-OSS 读第三方模型的配额桶。Pro 套餐下 Gemini 4 Argon 有单独的周额度(Antigravity CLI 1.4.x,`gemini-argon-wtu-weekly`),没有 5 小时额度,所以只显示这一个窗口。有没有这个桶,在 payload 带有 Gemini 配额时以 payload 为准:payload 有 Gemini 配额桶但没有 Argon 桶时(例如 Ultra 套餐),读 Gemini 的配额桶,即使 Pro 套餐时留下的 `/usage` 缓存里还有 Argon 桶。payload 不带 Gemini 配额时,交给缓存判断。如果这个官方 bucket 仍然看起来完全未消耗,但新鲜的 active-model 缓存已经显示有消耗,`agy-hud` 会使用新鲜缓存,避免显示过期的 `100% left`。旧版 CLI 或没有官方配额数据的 payload,会回退到本地配额缓存。默认缓存路径为:
 
 ```text
 $XDG_CACHE_HOME/agy-hud/quota_cache.json
