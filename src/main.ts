@@ -519,9 +519,11 @@ function spawnQuotaRefresh(cliVersion: string, lockToken: string): void {
       ...(cliVersion ? ["--cli-version", cliVersion] : []),
       "--background", "--lock-token", lockToken
     ];
+    // windowsHide: a detached child gets a console of its own on Windows, shown unless hidden.
     const child = spawn(process.argv[0], args, {
       detached: true,
-      stdio: "ignore"
+      stdio: "ignore",
+      windowsHide: true
     });
     child.unref();
   } catch {

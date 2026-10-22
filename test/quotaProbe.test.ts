@@ -408,6 +408,19 @@ test("reports an authentication rejection as its own cause", async () => {
   assert.equal(result.authRejected, true);
 });
 
+// Windows has neither ps nor lsof, so the loopback server cannot be found there; ps used to throw
+// ENOENT, which no caller reads as a refusal, so the /usage fallback never ran on Windows.
+test("on Windows the loopback is reported as refused without running ps or lsof", async () => {
+  const { runtime, calls } = hintRuntime();
+  const result = await refreshQuota("/tmp/quota-win32-test.json", { ...runtime, platform: "win32" });
+  assert.equal(result.ok, false);
+  assert.equal(result.authRejected, true);
+  assert.match(result.message, /Windows/);
+  assert.equal(calls.ps, 0);
+  assert.equal(calls.lsof, 0);
+  assert.deepEqual(calls.requests, []);
+});
+
 test("a rejecting listener does not hide quota from another port", async () => {
   const { runtime, calls } = hintRuntime();
   runtime.lsof = () => "agy 222 user 9u IPv4 0 TCP 127.0.0.1:1111 (LISTEN)\nagy 222 user 9u IPv4 0 TCP 127.0.0.1:2222 (LISTEN)";

@@ -15,7 +15,7 @@ import {
   runCli,
   version
 } from "../src/main";
-import { execFileSync } from "node:child_process";
+import childProcess, { execFileSync } from "node:child_process";
 
 function withEnv(overrides: Record<string, string | undefined>, run: () => void): void {
   const saved: Record<string, string | undefined> = {};
@@ -1404,6 +1404,25 @@ test("the background refresh is spawned with its lock token", async () => {
   const token = fs.readFileSync(`${fixture.writePath}.lock`, "utf8");
   assert.match(fs.readFileSync(fixture.markerPath, "utf8"), new RegExp(`--background --lock-token ${token}`));
   assert.equal(fs.statSync(`${fixture.writePath}.lock`).mode & 0o077, 0);
+});
+
+// The background refresh is detached, which on Windows gives it a console window of its own.
+test("the background refresh is spawned without a console window", async t => {
+  const seen: childProcess.SpawnOptions[] = [];
+  const original = childProcess.spawn;
+  t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
+    seen.push(args[2] as childProcess.SpawnOptions);
+    return (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
+  });
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10 * 60_000);
+  writeRefreshState(fixture.writePath, "working");
+  writeAuthRejected(fixture, "1.2.11");
+  await runStatuslineInHome(fixture, versionedPayload("1.2.11", "working"));
+  assert.equal(await waitForSpawn(fixture.markerPath), true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].detached, true);
+  assert.equal(seen[0].windowsHide, true);
 });
 
 test("a /usage success whose cache write fails still backs off", async () => {

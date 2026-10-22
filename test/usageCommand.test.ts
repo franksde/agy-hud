@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import childProcess from "node:child_process";
 import { parseUsageOutput, queryUsage, runAgy, usageArgs } from "../src/usageCommand";
 
 // Shape of `agy -p /usage --output-format json` on Antigravity CLI 1.2.11, identity fields omitted.
@@ -143,4 +144,20 @@ test("runAgy sends no signal after a run has settled", async () => {
     process.kill = originalKill;
   }
   assert.deepEqual(killed, [], "a clean run must not be followed by a group kill");
+});
+
+// A detached child gets a console of its own on Windows, which pops up a window each refresh unless
+// it is hidden. windowsHide does nothing elsewhere, so only the option itself can be checked here.
+test("runAgy hides the console window of its detached child", async t => {
+  const seen: childProcess.SpawnOptions[] = [];
+  const original = childProcess.spawn;
+  t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
+    seen.push(args[2] as childProcess.SpawnOptions);
+    return (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
+  });
+  const { command } = fakeAgy("echo ok");
+  await runAgy([], process.env, { command });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].detached, true);
+  assert.equal(seen[0].windowsHide, true);
 });

@@ -367,6 +367,13 @@ function buildQuotaCache(rawResponse, now) {
   return { cache, summary: lines.join("\n") };
 }
 async function refreshQuota(cachePath, runtime = defaultRuntime()) {
+  if ((runtime.platform ?? process.platform) === "win32") {
+    return {
+      ok: false,
+      authRejected: true,
+      message: "Loopback quota discovery needs ps and lsof, which Windows does not have, so quota comes from agy /usage."
+    };
+  }
   const hint = loadServerHint(cachePath, runtime);
   if (hint) {
     const raw = await tryRequest(runtime, hint.port, "");
@@ -643,7 +650,7 @@ function runAgy(args, env, options = {}) {
       }
       resolve(result);
     };
-    const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached: true });
+    const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached: true, windowsHide: true });
     const killGroup = () => {
       try {
         if (child.pid !== void 0) process.kill(-child.pid, "SIGKILL");
@@ -2073,7 +2080,8 @@ function spawnQuotaRefresh(cliVersion, lockToken) {
     ];
     const child = (0, import_node_child_process3.spawn)(process.argv[0], args, {
       detached: true,
-      stdio: "ignore"
+      stdio: "ignore",
+      windowsHide: true
     });
     child.unref();
   } catch {

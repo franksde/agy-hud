@@ -19,6 +19,7 @@ export interface ProbeRuntime {
   mkdir(dirPath: string): void;
   readFile?(filePath: string): string;
   processIdentity?(pid: string): string | null;
+  platform?: string;
 }
 
 interface ServerHint {
@@ -133,6 +134,16 @@ export function buildQuotaCache(rawResponse: unknown, now: Date): { cache: unkno
 }
 
 export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = defaultRuntime()): Promise<RefreshResult> {
+  // Discovery reads the process list with ps and the listening ports with lsof, neither of which
+  // Windows has. From CLI 1.2.2 on the loopback refuses the status line on every platform anyway, so
+  // this is reported as that refusal, which routes the refresh to /usage with its pacing and backoff.
+  if ((runtime.platform ?? process.platform) === "win32") {
+    return {
+      ok: false,
+      authRejected: true,
+      message: "Loopback quota discovery needs ps and lsof, which Windows does not have, so quota comes from agy /usage."
+    };
+  }
   const hint = loadServerHint(cachePath, runtime);
   if (hint) {
     const raw = await tryRequest(runtime, hint.port, "");
