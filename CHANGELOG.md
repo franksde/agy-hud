@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.14 — 2026-10-22
 
 - Added Windows support (#17, by @avometre): `hooks/status-line.cmd` starts the bundle with the first `node.exe` on `PATH`, exits without starting Node inside the nested `agy -p /usage` run, and exits 127 when there is no `node.exe`. It finds node through `PATH` alone and names every other program by its full path, because `cmd.exe` would otherwise run a `node.bat` or `more.com` from the current directory, which is the user's workspace. It does not search version-manager directories as `hooks/status-line.sh` does. The release archive now ships it, checked out with CRLF line endings, and both READMEs give the Windows `/statusline`, install and icons-off commands, and how to wire a path that contains a space.
 - On Windows, quota refreshes go straight to `/usage`. Finding the loopback server takes `ps` and `lsof`, which Windows does not have; the missing `ps` used to fail every refresh before the `/usage` fallback could run, leaving only the payload quota. The detached refresh and the `agy` it starts no longer open a console window there.
