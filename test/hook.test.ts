@@ -404,6 +404,20 @@ test("every hook is copied by the release workflow and both READMEs' staging ste
   }
 });
 
+// cmd.exe looks for a bare command name in the current directory before PATH, and the status line runs
+// in the user's workspace, so a node.bat, where.exe or more.com that a repository ships would run on
+// every redraw. No cmd.exe here to run the hook, so its text is checked: every program is reached by a
+// full path or through %~$PATH:, which searches PATH alone.
+test("status-line.cmd never runs a program by a bare name", () => {
+  const lines = fs.readFileSync(path.join(root, "hooks", "status-line.cmd"), "utf8").split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line !== "" && !/^(rem\b|echo\b|@echo off$|setlocal$)/i.test(line));
+  for (const line of lines) {
+    assert.doesNotMatch(line, /(^|[\s(&|'])(node|where|more)(\.exe|\.com)?(\s|$|')/i, line);
+  }
+  assert.ok(lines.some(line => /%%~\$PATH:\w/.test(line)), "node must be resolved through %~$PATH:");
+});
+
 // cmd.exe misparses some batch files with bare LF line endings, so the hook is checked out with CRLF
 // wherever it is built, the Linux release runner included (see .gitattributes).
 test("status-line.cmd is checked out with CRLF line endings", () => {
