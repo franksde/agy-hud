@@ -240,6 +240,48 @@ test("current Gemini, Claude and GPT labels select the matching dual quota windo
   }
 });
 
+// A real Antigravity CLI 1.4.5 payload (sanitized) with Gemini 4 Argon selected on a Pro plan. /usage
+// lists Argon as its own group there, with a weekly limit and no 5-hour one, so neither Gemini bucket
+// applies: here they read 100% and 39% left while Argon itself has nothing left.
+test("Gemini 4 Argon reads its own weekly bucket from a real 1.4.5 payload", () => {
+  const payload = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "testdata", "statusline_payload_1.4.5.json"), "utf8"));
+  const out = strip(render(payload, { config: defaultConfig(), quota: null, gitBranch: "main", now: new Date("2026-10-22T13:06:20Z") }));
+  const [line1, line2] = out.split("\n");
+  assert.match(line1, /4 Argon Med/);
+  assert.match(line2, /Usage \S+ 0% left ↻ Reset 1d 13h/);
+  assert.doesNotMatch(line2, /39%|100%/);
+});
+
+test("Gemini 4 Argon falls back to the Gemini buckets when it has no bucket of its own", () => {
+  // Ultra plans count Argon against the larger Gemini bucket, so the payload has no Argon entry.
+  const payload = { ...fixturePayload(), terminal_width: 180, model: { display_name: "Gemini 4 Argon (Medium)" }, quota: {
+    "gemini-5h": { remaining_fraction: 0.42 }, "gemini-weekly": { remaining_fraction: 0.81 }
+  } };
+  const usage = render(payload, { config: { ...defaultConfig(), color: false } }).split("\n")[1];
+  assert.match(usage, /42%.*81%/);
+});
+
+test("Gemini 4 Argon reads its weekly bucket from a usage cache", () => {
+  const payload = fixturePayload();
+  payload.model = { display_name: "Gemini 4 Argon (Medium)" };
+  payload.quota = { "gemini-5h": { remaining_fraction: 1, reset_time: fiveHourReset } };
+  const config = defaultConfig();
+  config.color = false;
+  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {},
+    quota: { "gemini-argon-wtu-weekly": { remaining_fraction: 0.25, reset_time: weeklyReset } } };
+  const out = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") }));
+  assert.match(out, /Usage \S+ 25% left ↻ Reset 3d 21h/);
+});
+
+test("Gemini models other than Argon ignore the Argon bucket", () => {
+  const payload = { ...fixturePayload(), terminal_width: 180, model: { display_name: "Gemini 3.8 Flash (High)" }, quota: {
+    "gemini-5h": { remaining_fraction: 0.42 }, "gemini-weekly": { remaining_fraction: 0.81 },
+    "gemini-argon-wtu-weekly": { remaining_fraction: 0 }
+  } };
+  const usage = render(payload, { config: { ...defaultConfig(), color: false } }).split("\n")[1];
+  assert.match(usage, /42%.*81%/);
+});
+
 test("context value formats", () => {
   const cases: Record<string, string> = {
     percent: "Context █░░░░░░░░░ 12%",

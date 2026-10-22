@@ -1,0 +1,61 @@
+{
+  "cwd": "agy-hud",
+  "session_id": "",
+  "conversation_id": "",
+  "transcript_path": "redacted-transcript.jsonl",
+  "model": {
+    "id": "Gemini 4 Argon (Medium)",
+    "display_name": "Gemini 4 Argon (Medium)",
+    "effort": "medium"
+  },
+  "workspace": {
+    "current_dir": "agy-hud",
+    "project_dir": "agy-hud"
+  },
+  "version": "1.4.5",
+  "context_window": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "context_window_size": 1048576,
+    "used_percentage": 0,
+    "remaining_percentage": 100,
+    "current_usage": null
+  },
+  "exceeds_200k_tokens": null,
+  "product": "antigravity",
+  "quota": {
+    "3p-5h": {
+      "remaining_fraction": 1,
+      "reset_time": "2026-10-22T18:06:19Z",
+      "reset_in_seconds": 17999
+    },
+    "3p-weekly": {
+      "remaining_fraction": 0.0994076,
+      "reset_time": "2026-10-23T20:38:12Z",
+      "reset_in_seconds": 113512
+    },
+    "gemini-5h": {
+      "remaining_fraction": 1,
+      "reset_time": "2026-10-22T18:04:30Z",
+      "reset_in_seconds": 17890
+    },
+    "gemini-argon-wtu-weekly": {
+      "remaining_fraction": 0,
+      "reset_time": "2026-10-24T02:29:39Z",
+      "reset_in_seconds": 134599
+    },
+    "gemini-weekly": {
+      "remaining_fraction": 0.39009675,
+      "reset_time": "2026-10-23T22:08:06Z",
+      "reset_in_seconds": 118906
+    }
+  },
+  "agent_state": "idle",
+  "cycle_mode": "auto",
+  "sandbox": {
+    "enabled": false
+  },
+  "plan_tier": "Google AI Pro",
+  "email": "",
+  "terminal_width": 140
+}

@@ -1105,7 +1105,7 @@ function officialQuotaInfo(officialQuota, modelDisplay) {
   if (!officialQuota) {
     return null;
   }
-  const keys = officialQuotaKeys(modelDisplay);
+  const keys = officialQuotaKeys(modelDisplay, officialQuota);
   const buckets = [];
   let sawKnownBucket = false;
   for (const { key, label } of keys) {
@@ -1165,10 +1165,14 @@ function quotaDisplay(windows) {
 function noQuota() {
   return { usagePct: 0, reset: "", hasQuota: false, windows: [] };
 }
-function officialQuotaKeys(modelDisplay) {
+var argonWeeklyKey = "gemini-argon-wtu-weekly";
+function officialQuotaKeys(modelDisplay, quota) {
   const normalized = modelDisplay.toLowerCase();
   if (normalized.includes("claude") || normalized.includes("gpt") || normalized.includes("oss")) {
     return [{ key: "3p-5h", label: "5h" }, { key: "3p-weekly", label: "W" }];
+  }
+  if (normalized.includes("argon") && Object.prototype.hasOwnProperty.call(quota, argonWeeklyKey)) {
+    return [{ key: argonWeeklyKey, label: "W" }];
   }
   return [{ key: "gemini-5h", label: "5h" }, { key: "gemini-weekly", label: "W" }];
 }

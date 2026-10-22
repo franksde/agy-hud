@@ -427,7 +427,7 @@ function officialQuotaInfo(officialQuota: Record<string, OfficialQuotaBucket> | 
   if (!officialQuota) {
     return null;
   }
-  const keys = officialQuotaKeys(modelDisplay);
+  const keys = officialQuotaKeys(modelDisplay, officialQuota);
   const buckets: QuotaWindowDisplay[] = [];
   let sawKnownBucket = false;
   for (const { key, label } of keys) {
@@ -491,10 +491,18 @@ function noQuota(): QuotaDisplay {
   return { usagePct: 0, reset: "", hasQuota: false, windows: [] };
 }
 
-function officialQuotaKeys(modelDisplay: string): Array<{ key: string; label: string }> {
+// On a Pro plan, CLI 1.4.x's /usage lists Gemini 4 Argon as a group of its own with a weekly limit and
+// no 5-hour one, so neither Gemini bucket applies to it. Ultra plans count Argon against the Gemini
+// buckets and send no Argon bucket, which is why its absence falls through to them.
+const argonWeeklyKey = "gemini-argon-wtu-weekly";
+
+function officialQuotaKeys(modelDisplay: string, quota: Record<string, OfficialQuotaBucket>): Array<{ key: string; label: string }> {
   const normalized = modelDisplay.toLowerCase();
   if (normalized.includes("claude") || normalized.includes("gpt") || normalized.includes("oss")) {
     return [{ key: "3p-5h", label: "5h" }, { key: "3p-weekly", label: "W" }];
+  }
+  if (normalized.includes("argon") && Object.prototype.hasOwnProperty.call(quota, argonWeeklyKey)) {
+    return [{ key: argonWeeklyKey, label: "W" }];
   }
   return [{ key: "gemini-5h", label: "5h" }, { key: "gemini-weekly", label: "W" }];
 }
