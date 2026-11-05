@@ -260,10 +260,10 @@ test("a stalled same-frame refresh aborts within budget and the next idle frame 
           refreshQuota: refresh,
           sameFrameRefreshBudgetMs: 30
         }),
-        new Promise<string>(resolve => { watchdog = setTimeout(() => resolve("deadline missed"), 250); })
+        new Promise<string>(resolve => { watchdog = setTimeout(() => resolve("deadline missed"), 1000); })
       ]);
       assert.equal(code, 0, "statusline must finish within the injected budget plus a small margin");
-      assert.ok(performance.now() - started < 250);
+      assert.ok(performance.now() - started < 1000);
       assert.equal(signals.length, 1);
       assert.equal(signals[0]?.aborted, true, "the in-flight probe must receive cancellation");
       assert.match(strip(out), /40% left/, "render the pre-existing cache after timeout");

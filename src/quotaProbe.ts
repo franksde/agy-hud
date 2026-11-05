@@ -4,7 +4,11 @@ import https from "node:https";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+// Wall-clock limit for one loopback request, from connect to the end of the reply. A socket
+// inactivity timeout is not enough: a TLS handshake that stalls is measured at about twice it.
 export const loopbackRequestTimeoutMs = 1500;
+// ps and lsof run synchronously, so no timer can interrupt them; each gets a limit of its own.
+export const discoveryCommandTimeoutMs = 1000;
 
 export interface LanguageServerInfo {
   pid: string;
@@ -273,8 +277,9 @@ async function tryRequest(runtime: ProbeRuntime, port: number, csrfToken: string
 
 function defaultRuntime(): ProbeRuntime {
   return {
-    ps: () => execFileSync("ps", ["aux"], { encoding: "utf8" }),
-    lsof: (pid: string) => execFileSync("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8" }),
+    ps: () => execFileSync("ps", ["aux"], { encoding: "utf8", timeout: discoveryCommandTimeoutMs }),
+    lsof: (pid: string) =>
+      execFileSync("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8", timeout: discoveryCommandTimeoutMs }),
     request: queryLanguageServer,
     now: () => new Date(),
     readFile: filePath => fs.readFileSync(filePath, "utf8"),
@@ -293,7 +298,12 @@ function defaultRuntime(): ProbeRuntime {
   };
 }
 
-export async function queryLanguageServer(port: number, csrfToken: string, signal?: AbortSignal): Promise<unknown | null> {
+export async function queryLanguageServer(
+  port: number,
+  csrfToken: string,
+  signal?: AbortSignal,
+  timeoutMs = loopbackRequestTimeoutMs
+): Promise<unknown | null> {
   if (signal?.aborted) return null;
   const endpoint = `/exa.language_server_pb.LanguageServerService/GetUserStatus`;
   const headers: Record<string, string> = {
@@ -312,7 +322,7 @@ export async function queryLanguageServer(port: number, csrfToken: string, signa
     headers,
     rejectUnauthorized: false,
     signal
-  });
+  }, timeoutMs);
   if (signal?.aborted) return null;
   if (httpsResult !== null) {
     return httpsResult;
@@ -325,14 +335,20 @@ export async function queryLanguageServer(port: number, csrfToken: string, signa
     method: "POST",
     headers,
     signal
-  });
+  }, timeoutMs);
 }
 
 function requestJson(
   mod: typeof http | typeof https,
-  options: http.RequestOptions & { rejectUnauthorized?: boolean }
+  options: http.RequestOptions & { rejectUnauthorized?: boolean },
+  timeoutMs: number
 ): Promise<unknown | null> {
-  return new Promise(resolve => {
+  return new Promise(outerResolve => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const resolve = (value: unknown | null) => {
+      clearTimeout(timer);
+      outerResolve(value);
+    };
     const req = mod.request(options, res => {
       const chunks: Buffer[] = [];
       res.on("data", chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
@@ -352,10 +368,10 @@ function requestJson(
         }
       });
     });
-    req.setTimeout(loopbackRequestTimeoutMs, () => {
+    timer = setTimeout(() => {
       req.destroy();
       resolve(null);
-    });
+    }, timeoutMs);
     req.on("error", () => resolve(null));
     req.write("{}");
     req.end();

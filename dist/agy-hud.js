@@ -286,6 +286,7 @@ var import_node_https = __toESM(require("node:https"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
 var loopbackRequestTimeoutMs = 1500;
+var discoveryCommandTimeoutMs = 1e3;
 var probeAuthRejected = /* @__PURE__ */ Symbol("agy-hud.probeAuthRejected");
 function parseLanguageServerInfo(psOutput) {
   for (const line of psOutput.split(/\r?\n/)) {
@@ -493,8 +494,8 @@ async function tryRequest(runtime, port, csrfToken, signal) {
 }
 function defaultRuntime() {
   return {
-    ps: () => (0, import_node_child_process.execFileSync)("ps", ["aux"], { encoding: "utf8" }),
-    lsof: (pid) => (0, import_node_child_process.execFileSync)("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8" }),
+    ps: () => (0, import_node_child_process.execFileSync)("ps", ["aux"], { encoding: "utf8", timeout: discoveryCommandTimeoutMs }),
+    lsof: (pid) => (0, import_node_child_process.execFileSync)("lsof", ["-nP", "-iTCP", "-a", "-p", pid], { encoding: "utf8", timeout: discoveryCommandTimeoutMs }),
     request: queryLanguageServer,
     now: () => /* @__PURE__ */ new Date(),
     readFile: (filePath) => import_node_fs3.default.readFileSync(filePath, "utf8"),
@@ -513,7 +514,7 @@ function defaultRuntime() {
     mkdir: (dirPath) => import_node_fs3.default.mkdirSync(dirPath, { recursive: true, mode: 448 })
   };
 }
-async function queryLanguageServer(port, csrfToken, signal) {
+async function queryLanguageServer(port, csrfToken, signal, timeoutMs = loopbackRequestTimeoutMs) {
   if (signal?.aborted) return null;
   const endpoint = `/exa.language_server_pb.LanguageServerService/GetUserStatus`;
   const headers = {
@@ -532,7 +533,7 @@ async function queryLanguageServer(port, csrfToken, signal) {
     headers,
     rejectUnauthorized: false,
     signal
-  });
+  }, timeoutMs);
   if (signal?.aborted) return null;
   if (httpsResult !== null) {
     return httpsResult;
@@ -545,10 +546,15 @@ async function queryLanguageServer(port, csrfToken, signal) {
     method: "POST",
     headers,
     signal
-  });
+  }, timeoutMs);
 }
-function requestJson(mod, options) {
-  return new Promise((resolve) => {
+function requestJson(mod, options, timeoutMs) {
+  return new Promise((outerResolve) => {
+    let timer;
+    const resolve = (value) => {
+      clearTimeout(timer);
+      outerResolve(value);
+    };
     const req = mod.request(options, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
@@ -568,10 +574,10 @@ function requestJson(mod, options) {
         }
       });
     });
-    req.setTimeout(loopbackRequestTimeoutMs, () => {
+    timer = setTimeout(() => {
       req.destroy();
       resolve(null);
-    });
+    }, timeoutMs);
     req.on("error", () => resolve(null));
     req.write("{}");
     req.end();

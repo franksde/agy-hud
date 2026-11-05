@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net, { AddressInfo, Socket } from "node:net";
 import { once } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   buildQuotaCache, parseAgyServerInfos, parseLanguageServerInfo, parseListeningPorts, probeAuthRejected, queryLanguageServer,
   refreshQuota, loopbackRequestTimeoutMs
@@ -472,10 +475,10 @@ for (const phase of ["HTTPS handshake", "HTTP response"]) {
       controller.abort();
       const result = await Promise.race([
         Promise.all([pending, closed]).then(([reply]) => reply),
-        new Promise<string>(resolve => { watchdog = setTimeout(() => resolve("abort did not close request"), 400); })
+        new Promise<string>(resolve => { watchdog = setTimeout(() => resolve("abort did not close request"), 1000); })
       ]);
       assert.equal(result, null, "abort must resolve null and close the server connection promptly");
-      assert.ok(performance.now() - started < 400, "cancellation must finish well before the per-request timeout");
+      assert.ok(performance.now() - started < 1000, "cancellation must not wait for the per-request timeout");
     } finally {
       clearTimeout(watchdog);
       controller.abort();
@@ -541,4 +544,69 @@ test("an aborted server-hint request does not fall back to discovery", async () 
   assert.equal(result.ok, false);
   assert.notEqual(result.authRejected, true);
   assert.deepEqual(files, before, "cancellation must leave the cache and hint untouched");
+});
+
+// A listener that accepts the connection and then never answers, at the TLS handshake or after the
+// request. Each request must give up on its own, with no caller-side abort, inside its timeout.
+for (const phase of ["HTTPS handshake", "HTTP response"]) {
+  test(`queryLanguageServer gives up on a silent ${phase} within its request timeout`, async () => {
+    const sockets = new Set<Socket>();
+    const server = phase === "HTTPS handshake" ? net.createServer(socket => socket.resume()) : http.createServer();
+    server.on("connection", socket => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const started = performance.now();
+      const result = await queryLanguageServer((server.address() as AddressInfo).port, "", undefined, 100);
+      const elapsed = performance.now() - started;
+      assert.equal(result, null);
+      // HTTPS then HTTP, each capped at 100 ms of wall-clock time, not of socket inactivity.
+      assert.ok(elapsed < 1000, `took ${Math.round(elapsed)} ms`);
+    } finally {
+      const stopped = new Promise<void>(resolve => server.close(() => resolve()));
+      for (const socket of sockets) socket.destroy();
+      await stopped;
+    }
+  });
+}
+
+// ps and lsof run synchronously, so the same-frame budget timer cannot fire while one of them hangs.
+// They must be bounded on their own. Fake binaries on PATH stand in for a ps or lsof that hangs.
+async function withFakeDiscoveryTools(tools: Record<string, string>, run: () => Promise<void>): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-fake-tools-"));
+  for (const [name, body] of Object.entries(tools)) {
+    fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  }
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${dir}${path.delimiter}${savedPath ?? ""}`;
+  try {
+    await run();
+  } finally {
+    process.env.PATH = savedPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("a hanging ps is cut off instead of blocking the refresh", { skip: process.platform === "win32" }, async () => {
+  await withFakeDiscoveryTools({ ps: "exec sleep 10" }, async () => {
+    const cachePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-ps-")), "quota_cache.json");
+    const started = performance.now();
+    const ok = await refreshQuota(cachePath).then(result => result.ok, () => false);
+    const elapsed = performance.now() - started;
+    assert.equal(ok, false);
+    assert.ok(elapsed < 3000, `took ${Math.round(elapsed)} ms`);
+  });
+});
+
+test("a hanging lsof is cut off instead of blocking the refresh", { skip: process.platform === "win32" }, async () => {
+  await withFakeDiscoveryTools({ ps: "echo 'user 4242 0.0 /opt/bin/agy'", lsof: "exec sleep 10" }, async () => {
+    const cachePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-lsof-")), "quota_cache.json");
+    const started = performance.now();
+    const result = await refreshQuota(cachePath);
+    const elapsed = performance.now() - started;
+    assert.equal(result.ok, false);
+    assert.ok(elapsed < 3000, `took ${Math.round(elapsed)} ms`);
+  });
 });

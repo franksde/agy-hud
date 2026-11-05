@@ -321,7 +321,7 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 
 `doctor` 自检一次安装:Node 版本、CLI 的状态栏接到了哪条命令、已安装的插件以及那条命令是否运行它(Antigravity CLI 1.3.4+)、当前生效的配置文件与 `show_icons` 的解析结果、识别到的终端、是否 SSH 会话、启发式字体扫描,以及一行给你读的图标探针。它不改动磁盘上的任何东西。`--json` 输出同一份报告的机器可读 JSON,供刚完成安装、需要自查的 agent 使用;各字段该怎么处理见[面向 AI Agent](#面向-ai-agent)。
 
-`statusline` 从标准输入以及本地配置/缓存文件渲染。标准输入里一旦有完整的 JSON 对象就开始渲染,不等 CLI 关闭管道;1 秒内仍没有收到,就不再等待。原因是 Antigravity CLI 有时不关闭这个管道([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)),而状态栏超时未退出会被它杀掉。当 `agent_state` 从 active work 回到 `idle` 时,它会先做一次本地 loopback `quota refresh` 再渲染,让同一次 redraw 就能反映本轮回答后的配额。这次刷新最多等 2 秒:本地服务到时仍未应答,就用已缓存的配额渲染,取消这次探测,改由后台继续刷新。每个 loopback 请求的超时为 1.5 秒。缺失或过期缓存仍会用后台刷新作为兜底。`quota refresh` 会向正在运行的 Antigravity 本地服务请求 `GetUserStatus`,写入脱敏后的配额缓存;如果找不到可用的本地服务,会以非零状态退出。在 Antigravity CLI 1.2.2 及以后,本地服务会拒绝这个请求,此时跳过同帧刷新,`quota refresh` 改为执行官方的 `agy -p /usage`,且只在后台运行;见[配额缓存](#配额缓存)。
+`statusline` 从标准输入以及本地配置/缓存文件渲染。标准输入里一旦有完整的 JSON 对象就开始渲染,不等 CLI 关闭管道;1 秒内仍没有收到,就不再等待。原因是 Antigravity CLI 有时不关闭这个管道([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)),而状态栏超时未退出会被它杀掉。当 `agent_state` 从 active work 回到 `idle` 时,它会先做一次本地 loopback `quota refresh` 再渲染,让同一次 redraw 就能反映本轮回答后的配额。重绘最多为这次刷新等 2 秒:本地服务到时仍未应答,就用已缓存的配额渲染,取消这次探测,改由后台继续刷新。每个 loopback 请求从发出起 1.5 秒内没完成就放弃;查找服务用的 `ps` 和 `lsof` 各自最多运行 1 秒。这两个命令是同步执行的,2 秒的等待打断不了它们,只能靠它们各自的时限。缺失或过期缓存仍会用后台刷新作为兜底。`quota refresh` 会向正在运行的 Antigravity 本地服务请求 `GetUserStatus`,写入脱敏后的配额缓存;如果找不到可用的本地服务,会以非零状态退出。在 Antigravity CLI 1.2.2 及以后,本地服务会拒绝这个请求,此时跳过同帧刷新,`quota refresh` 改为执行官方的 `agy -p /usage`,且只在后台运行;见[配额缓存](#配额缓存)。
 
 ## 配置
 
