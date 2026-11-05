@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import childProcess from "node:child_process";
 import { parseUsageOutput, queryUsage, runAgy, usageArgs } from "../src/usageCommand";
+import { writeFakeExecutable } from "./fakeExecutable";
 
 // Shape of `agy -p /usage --output-format json` on Antigravity CLI 1.2.11, identity fields omitted.
 function usageJson(buckets: unknown[] = [
@@ -74,9 +75,7 @@ test("queryUsage runs agy with the /usage arguments and marks the child as neste
 
 function fakeAgy(body: string): { command: string; dir: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-fake-"));
-  const command = path.join(dir, "agy");
-  fs.writeFileSync(command, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-  return { command, dir };
+  return { command: writeFakeExecutable(dir, "agy", body), dir };
 }
 
 test("runAgy runs in a private scratch directory that it removes afterwards", async () => {

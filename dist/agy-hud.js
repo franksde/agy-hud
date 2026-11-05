@@ -392,7 +392,12 @@ async function refreshQuota(cachePath, runtime = defaultRuntime(), signal) {
     if (built) return saveQuotaCache(cachePath, built, runtime);
     saveServerHint(cachePath, null, runtime);
   }
-  const psOutput = runtime.ps();
+  let psOutput;
+  try {
+    psOutput = runtime.ps();
+  } catch (error) {
+    return { ok: false, message: `Could not list running processes: ${error instanceof Error ? error.message : String(error)}` };
+  }
   const languageServer = parseLanguageServerInfo(psOutput);
   const candidates = [...parseAgyServerInfos(psOutput), ...languageServer ? [languageServer] : []];
   if (candidates.length === 0) {
@@ -502,7 +507,7 @@ function defaultRuntime() {
     processIdentity: (pid) => {
       const identity = (0, import_node_child_process.execFileSync)("ps", ["-p", pid, "-o", "lstart=", "-o", "comm="], {
         encoding: "utf8",
-        timeout: 1e3,
+        timeout: discoveryCommandTimeoutMs,
         env: { ...process.env, LC_ALL: "C" }
       }).trim();
       const match = identity.match(/^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+(.+)$/);
@@ -557,6 +562,10 @@ function requestJson(mod, options, timeoutMs) {
     };
     const req = mod.request(options, (res) => {
       const chunks = [];
+      res.on("close", () => {
+        if (!res.complete) resolve(null);
+      });
+      res.on("error", () => resolve(null));
       res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => {
         if (res.statusCode === 401) {
@@ -2070,6 +2079,8 @@ function readStdin(stdin, timeoutMs) {
       stdin.removeListener("data", onData);
       stdin.removeListener("end", finish);
       stdin.removeListener("error", finish);
+      stdin.on("error", () => {
+      });
       stdin.pause();
       stdin.destroy?.();
       resolve(raw);

@@ -744,7 +744,8 @@ async function runWithStdinHeldOpen(
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   try {
     const exited = await Promise.race([
-      new Promise<true>(resolve => child.once("exit", () => resolve(true))),
+      // "close", not "exit": only then has all of the child's stdout been delivered.
+      new Promise<true>(resolve => child.once("close", () => resolve(true))),
       new Promise<false>(resolve => { watchdog = setTimeout(() => resolve(false), 4000); })
     ]);
     return { exited, code: child.exitCode, stdout, elapsedMs: performance.now() - started };

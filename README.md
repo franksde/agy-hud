@@ -480,4 +480,6 @@ npm test
 
 Quota fields depend on local Antigravity availability and a compatible local cache. If Antigravity is not running, or its local `GetUserStatus` endpoint changes, the HUD omits quota details.
 
+Inside the `agy -p /usage` run that a quota refresh starts, `hooks/status-line.sh` and `hooks/status-line.cmd` read the status-line input to its end before exiting, without starting Node. Should the CLI hold that pipe open ([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)), the hook waits until the CLI stops it. That run is print mode and never shows a status line, and on Antigravity CLI 1.5.1 the pipe was measured to close normally there.
+
 On Windows, `doctor` compares paths as text, so a status line wired through an 8.3 short path reads as a copy other than the installed one. `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found), and a `/usage` run that times out is killed without the helpers `agy` may have started, since Windows has no process groups. CI runs on Linux only. The contributed hook was verified by hand on Windows 11 with Antigravity CLI 1.4.4; the later changes for Windows (the `/usage` route, doctor's Windows paths and the hardened hook) are covered by tests on Linux and macOS but have not yet been run on Windows.

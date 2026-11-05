@@ -426,6 +426,8 @@ function readStdin(stdin: NodeJS.ReadableStream, timeoutMs: number): Promise<str
       stdin.removeListener("data", onData);
       stdin.removeListener("end", finish);
       stdin.removeListener("error", finish);
+      // A late error on the abandoned stream must not become an uncaught exception.
+      stdin.on("error", () => {});
       // An open pipe that is still being read keeps the process alive after the line is printed.
       stdin.pause();
       (stdin as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();

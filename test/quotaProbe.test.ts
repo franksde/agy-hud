@@ -10,6 +10,7 @@ import {
   buildQuotaCache, parseAgyServerInfos, parseLanguageServerInfo, parseListeningPorts, probeAuthRejected, queryLanguageServer,
   refreshQuota, loopbackRequestTimeoutMs
 } from "../src/quotaProbe";
+import { writeFakeExecutable } from "./fakeExecutable";
 
 test("parseLanguageServerInfo extracts pid and csrf token", () => {
   const ps = [
@@ -572,12 +573,58 @@ for (const phase of ["HTTPS handshake", "HTTP response"]) {
   });
 }
 
+// A reply that keeps trickling bytes never lets a socket inactivity timeout fire. The request limit
+// is wall-clock time, so it must still give up.
+test("queryLanguageServer gives up on a reply that trickles past its request timeout", { timeout: 3000 }, async () => {
+  const timers = new Set<ReturnType<typeof setInterval>>();
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.write("{");
+    const timer = setInterval(() => res.write(" "), 20);
+    timers.add(timer);
+    res.on("close", () => { clearInterval(timer); timers.delete(timer); });
+  });
+  const sockets = new Set<Socket>();
+  server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const started = performance.now();
+    const result = await queryLanguageServer((server.address() as AddressInfo).port, "", undefined, 200);
+    assert.equal(result, null);
+    assert.ok(performance.now() - started < 1500, `took ${Math.round(performance.now() - started)} ms`);
+  } finally {
+    for (const timer of timers) clearInterval(timer);
+    const stopped = new Promise<void>(resolve => server.close(() => resolve()));
+    for (const socket of sockets) socket.destroy();
+    await stopped;
+  }
+});
+
+// The server drops the connection halfway through the body. The request is over at that point; it
+// must not wait out its timer, which would keep a finished status line alive.
+test("queryLanguageServer settles at once when the reply is cut off mid-body", { timeout: 5000 }, async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "100" });
+    res.write("{\"userStatus\":");
+    setTimeout(() => res.socket?.destroy(), 20);
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const started = performance.now();
+    const result = await queryLanguageServer((server.address() as AddressInfo).port, "", undefined, 3000);
+    assert.equal(result, null);
+    assert.ok(performance.now() - started < 1000, `took ${Math.round(performance.now() - started)} ms`);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 // ps and lsof run synchronously, so the same-frame budget timer cannot fire while one of them hangs.
 // They must be bounded on their own. Fake binaries on PATH stand in for a ps or lsof that hangs.
 async function withFakeDiscoveryTools(tools: Record<string, string>, run: () => Promise<void>): Promise<void> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-fake-tools-"));
   for (const [name, body] of Object.entries(tools)) {
-    fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    writeFakeExecutable(dir, name, body);
   }
   const savedPath = process.env.PATH;
   process.env.PATH = `${dir}${path.delimiter}${savedPath ?? ""}`;
@@ -593,9 +640,10 @@ test("a hanging ps is cut off instead of blocking the refresh", { skip: process.
   await withFakeDiscoveryTools({ ps: "exec sleep 10" }, async () => {
     const cachePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-ps-")), "quota_cache.json");
     const started = performance.now();
-    const ok = await refreshQuota(cachePath).then(result => result.ok, () => false);
+    const result = await refreshQuota(cachePath);
     const elapsed = performance.now() - started;
-    assert.equal(ok, false);
+    assert.equal(result.ok, false, "a ps that times out is reported as a failed refresh, not thrown");
+    assert.notEqual(result.authRejected, true);
     assert.ok(elapsed < 3000, `took ${Math.round(elapsed)} ms`);
   });
 });

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { writeFakeExecutable } from "./fakeExecutable";
 
 const root = path.join(__dirname, "..", "..");
 const hook = path.join(root, "hooks", "status-line.sh");
@@ -48,8 +49,7 @@ function sandbox(): Sandbox {
 
 // A stand-in for node that reports which copy ran, the arguments it got and the PATH it saw.
 function fakeNode(binDir: string, label: string): void {
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(binDir, "node"), `#!/bin/sh\necho "${label}|$*|$PATH"\n`, { mode: 0o755 });
+  writeFakeExecutable(binDir, "node", `echo "${label}|$*|$PATH"`);
 }
 
 function write(file: string, content: string): void {

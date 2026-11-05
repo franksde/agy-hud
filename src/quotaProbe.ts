@@ -163,7 +163,12 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
     // lost here only costs another discovery; it cannot suppress or corrupt the quota refresh.
     saveServerHint(cachePath, null, runtime);
   }
-  const psOutput = runtime.ps();
+  let psOutput: string;
+  try {
+    psOutput = runtime.ps();
+  } catch (error) {
+    return { ok: false, message: `Could not list running processes: ${error instanceof Error ? error.message : String(error)}` };
+  }
   const languageServer = parseLanguageServerInfo(psOutput);
   const candidates = [...parseAgyServerInfos(psOutput), ...(languageServer ? [languageServer] : [])];
   if (candidates.length === 0) {
@@ -285,7 +290,7 @@ function defaultRuntime(): ProbeRuntime {
     readFile: filePath => fs.readFileSync(filePath, "utf8"),
     processIdentity: pid => {
       const identity = execFileSync("ps", ["-p", pid, "-o", "lstart=", "-o", "comm="], {
-        encoding: "utf8", timeout: 1000, env: { ...process.env, LC_ALL: "C" }
+        encoding: "utf8", timeout: discoveryCommandTimeoutMs, env: { ...process.env, LC_ALL: "C" }
       }).trim();
       const match = identity.match(/^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+(.+)$/);
       return match && path.basename(match[1]) === "agy" ? identity : null;
@@ -351,6 +356,12 @@ function requestJson(
     };
     const req = mod.request(options, res => {
       const chunks: Buffer[] = [];
+      // A reply cut off mid-body ends the request without "end" or a request "error"; settle it here
+      // so the timer does not keep a finished process alive.
+      res.on("close", () => {
+        if (!res.complete) resolve(null);
+      });
+      res.on("error", () => resolve(null));
       res.on("data", chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => {
         if (res.statusCode === 401) {
