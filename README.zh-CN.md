@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.4.5;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.4.5,安装和 `/usage` 回退另在 1.5.1 上验证;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
 - macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`,且 CLI 必须是通过 `cmd.exe` 运行状态栏的版本,大概是 1.1.2 或更新(见[从 GitHub Release 安装](#从-github-release-安装))。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
@@ -263,7 +263,7 @@ agy plugin uninstall agy-hud
 
    ```json
    {
-     "version": "0.1.14",
+     "version": "0.1.15",
      "homedir": "/home/u",
      "nodeVersion": "v22.14.0",
      "nodeOk": true,
@@ -279,7 +279,7 @@ agy plugin uninstall agy-hud
      "remoteSession": false,
      "nerdFont": "not-found",
      "nerdFontMatches": [],
-     "installedPlugin": { "version": "0.1.14", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
+     "installedPlugin": { "version": "0.1.15", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
      "installedPluginStatus": "found",
      "statuslineRunsInstalled": true
    }
@@ -401,7 +401,7 @@ node <插件根目录>/dist/agy-hud.js quota refresh
 
 从 0.1.9 开始,配额刷新可复用配额缓存旁的 `quota_cache.json.server.json`(或 `<AGY_HUD_QUOTA_CACHE>.server.json`)。它只记录 PID、本地端口、进程身份(启动时间和可执行文件路径)及发现时间。每次复用前通过定向 `ps` 校验身份,省去全量进程扫描和 `lsof`;提示缓存五分钟后过期。请求失败或配额格式异常时,同一次刷新立即重新发现服务。需要 CSRF 的旧服务不写入提示缓存。配额刷新间隔、后台刷新和 working-to-idle 同帧校正均保持不变。
 
-从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11、1.2.14、1.2.16、1.3.5 和 1.4.5 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
+从 Antigravity CLI 1.2.2 起(版本边界由 [CodexBar](https://github.com/steipete/CodexBar/pull/3685) 实测,本项目在 1.2.11、1.2.14、1.2.16、1.3.5、1.4.5 和 1.5.1 上验证),`agy` loopback 服务对 `GetUserStatus` 返回 `401 missing CSRF token`,而 CLI 不会把这个 token 交给状态栏命令。状态栏 payload 里仍有官方配额,但会滞后:一轮进行中完全不动;如果一轮的消耗在 CLI 结束时那次拉取之后才入账,就要等到下一轮结束才显示。在 1.2.11 上实测,一个空闲会话显示的 5 小时额度落后了 25 分钟。
 
 Windows 上没有查找 loopback 服务所需的 `ps` 和 `lsof`,所以 `quota refresh` 一开始就按 loopback 被拒处理,直接走 `/usage`,节流和退避与下文相同。
 

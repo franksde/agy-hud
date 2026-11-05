@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.15 — 2026-11-05
 
 - The status line is no longer killed when a turn settles to idle (#18). That redraw now waits at most 2 seconds for the quota refresh it runs first; past that it renders the cached quota, cancels the loopback probe and leaves the refresh to the background. A loopback port that accepted the connection but never answered used to hold the redraw for 10 seconds per port (5 s over HTTPS, then 5 s over HTTP), which reached the CLI's status-line timeout on Antigravity CLI 1.5.0, and because the killed run never saved its state, the next idle redraw tried again. Each loopback request is now abandoned 1.5 seconds after it starts, measured as elapsed time rather than socket inactivity, which let a stalled TLS handshake run about twice as long. The `ps` and `lsof` calls that find the server, which run synchronously and so cannot be interrupted by that wait, are each stopped after 1 second.
 - The status line no longer waits for the CLI to close stdin. It renders as soon as a complete JSON payload has arrived, and gives up after 1 second on a stdin that has produced none. Antigravity CLI can hold the pipe open ([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)); a status line waiting for end of input was then killed, and 30 kills in a row turn the status line off. Wired directly to the bundle, the nested `/usage` status line stops waiting the same way; through `hooks/status-line.sh` or `hooks/status-line.cmd` it is still drained to end of input without starting Node, as before.
+- Measured on Antigravity CLI 1.5.1: the loopback server still refuses `GetUserStatus` on every port, the `/usage` quota fallback works, and `agy plugin validate --strict` and install pass on the release file set. Rendering stays verified through 1.4.5.
 
 ## 0.1.14 — 2026-10-22
 
