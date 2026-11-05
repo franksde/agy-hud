@@ -587,12 +587,21 @@ test("queryLanguageServer gives up on a reply that trickles past its request tim
   const sockets = new Set<Socket>();
   server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
   try {
     const started = performance.now();
-    const result = await queryLanguageServer((server.address() as AddressInfo).port, "", undefined, 200);
+    // Rejects instead of hanging if the limit regresses to socket inactivity, so finally still runs
+    // and the trickling server cannot keep the test process alive.
+    const result = await Promise.race([
+      queryLanguageServer((server.address() as AddressInfo).port, "", undefined, 200),
+      new Promise<never>((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error("request outlived its 200 ms limit")), 1500);
+      })
+    ]);
     assert.equal(result, null);
     assert.ok(performance.now() - started < 1500, `took ${Math.round(performance.now() - started)} ms`);
   } finally {
+    clearTimeout(watchdog);
     for (const timer of timers) clearInterval(timer);
     const stopped = new Promise<void>(resolve => server.close(() => resolve()));
     for (const socket of sockets) socket.destroy();
