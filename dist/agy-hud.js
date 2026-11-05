@@ -158,6 +158,7 @@ __export(main_exports, {
   quotaCacheWritePath: () => quotaCacheWritePath,
   renderStatusline: () => renderStatusline,
   runCli: () => runCli,
+  sameFrameRefreshBudgetMs: () => sameFrameRefreshBudgetMs,
   userConfigPath: () => userConfigPath,
   version: () => version
 });
@@ -283,6 +284,7 @@ var import_node_http = __toESM(require("node:http"));
 var import_node_https = __toESM(require("node:https"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_child_process = require("node:child_process");
+var loopbackRequestTimeoutMs = 1500;
 var probeAuthRejected = /* @__PURE__ */ Symbol("agy-hud.probeAuthRejected");
 function parseLanguageServerInfo(psOutput) {
   for (const line of psOutput.split(/\r?\n/)) {
@@ -369,7 +371,9 @@ function buildQuotaCache(rawResponse, now) {
   lines.push("=====================");
   return { cache, summary: lines.join("\n") };
 }
-async function refreshQuota(cachePath, runtime = defaultRuntime()) {
+async function refreshQuota(cachePath, runtime = defaultRuntime(), signal) {
+  const aborted = { ok: false, message: "Quota refresh aborted." };
+  if (signal?.aborted) return aborted;
   if ((runtime.platform ?? process.platform) === "win32") {
     return {
       ok: false,
@@ -378,8 +382,10 @@ async function refreshQuota(cachePath, runtime = defaultRuntime()) {
     };
   }
   const hint = loadServerHint(cachePath, runtime);
+  if (signal?.aborted) return aborted;
   if (hint) {
-    const raw = await tryRequest(runtime, hint.port, "");
+    const raw = await tryRequest(runtime, hint.port, "", signal);
+    if (signal?.aborted) return aborted;
     const built = buildQuotaCache(raw, runtime.now());
     if (built) return saveQuotaCache(cachePath, built, runtime);
     saveServerHint(cachePath, null, runtime);
@@ -394,6 +400,7 @@ async function refreshQuota(cachePath, runtime = defaultRuntime()) {
   let sawResponse = false;
   let sawAuthRejection = false;
   for (const info of candidates) {
+    if (signal?.aborted) return aborted;
     const identity = info.kind === "agy" ? processIdentity(runtime, info.pid) : null;
     let ports;
     try {
@@ -405,7 +412,9 @@ async function refreshQuota(cachePath, runtime = defaultRuntime()) {
       sawPort = true;
     }
     for (const port of ports) {
-      const rawResponse = await tryRequest(runtime, port, info.csrfToken);
+      if (signal?.aborted) return aborted;
+      const rawResponse = await tryRequest(runtime, port, info.csrfToken, signal);
+      if (signal?.aborted) return aborted;
       if (rawResponse === probeAuthRejected) {
         sawAuthRejection = true;
         continue;
@@ -474,9 +483,9 @@ function saveServerHint(cachePath, hint, runtime) {
   } catch {
   }
 }
-async function tryRequest(runtime, port, csrfToken) {
+async function tryRequest(runtime, port, csrfToken, signal) {
   try {
-    return await runtime.request(port, csrfToken);
+    return await runtime.request(port, csrfToken, signal);
   } catch {
     return null;
   }
@@ -503,7 +512,8 @@ function defaultRuntime() {
     mkdir: (dirPath) => import_node_fs3.default.mkdirSync(dirPath, { recursive: true, mode: 448 })
   };
 }
-async function queryLanguageServer(port, csrfToken) {
+async function queryLanguageServer(port, csrfToken, signal) {
+  if (signal?.aborted) return null;
   const endpoint = `/exa.language_server_pb.LanguageServerService/GetUserStatus`;
   const headers = {
     "Content-Type": "application/json",
@@ -519,8 +529,10 @@ async function queryLanguageServer(port, csrfToken) {
     path: endpoint,
     method: "POST",
     headers,
-    rejectUnauthorized: false
+    rejectUnauthorized: false,
+    signal
   });
+  if (signal?.aborted) return null;
   if (httpsResult !== null) {
     return httpsResult;
   }
@@ -530,7 +542,8 @@ async function queryLanguageServer(port, csrfToken) {
     port,
     path: endpoint,
     method: "POST",
-    headers
+    headers,
+    signal
   });
 }
 function requestJson(mod, options) {
@@ -554,7 +567,7 @@ function requestJson(mod, options) {
         }
       });
     });
-    req.setTimeout(5e3, () => {
+    req.setTimeout(loopbackRequestTimeoutMs, () => {
       req.destroy();
       resolve(null);
     });
@@ -1717,6 +1730,7 @@ function nerdFontLines(report) {
 
 // src/main.ts
 var version = "0.1.14";
+var sameFrameRefreshBudgetMs = 2e3;
 var consumedQuotaRefreshMs = 15 * 1e3;
 var untouchedQuotaRefreshMs = 30 * 1e3;
 function renderStatusline(input, cfg = defaultConfig(), cache = null) {
@@ -1959,9 +1973,10 @@ async function runCli(args, deps = {}) {
       cachePath,
       ok ? cache : null,
       payload,
-      deps.refreshQuota ?? refreshQuota,
+      deps.refreshQuota ?? ((cachePath2, signal) => refreshQuota(cachePath2, void 0, signal)),
       cliVersion,
-      probeRejected
+      probeRejected,
+      deps.sameFrameRefreshBudgetMs ?? sameFrameRefreshBudgetMs
     );
     triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed, cliVersion, probeRejected);
     stdout(`${renderStatusline(raw, cfg, displayCache)}
@@ -2046,12 +2061,23 @@ function readStdin(stdin) {
     });
   });
 }
-async function refreshQuotaBeforeRenderIfNeeded(cachePath, cache, payload, refresh, cliVersion, probeRejected) {
+async function refreshQuotaBeforeRenderIfNeeded(cachePath, cache, payload, refresh, cliVersion, probeRejected, budgetMs) {
   if (probeRejected || !shouldRefreshBeforeRender(cachePath, payload, /* @__PURE__ */ new Date())) {
     return [cache, false];
   }
+  const controller = new AbortController();
+  let timer;
   try {
-    const result = await refresh(cachePath);
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        resolve(null);
+        controller.abort();
+      }, budgetMs);
+    });
+    const result = await Promise.race([refresh(cachePath, controller.signal), deadline]);
+    if (result === null || controller.signal.aborted) {
+      return [cache, false];
+    }
     recordAuthRejection(cachePath, result, cliVersion);
     if (!result.ok) {
       return [cache, false];
@@ -2067,6 +2093,8 @@ async function refreshQuotaBeforeRenderIfNeeded(cachePath, cache, payload, refre
     return [freshCache, true];
   } catch {
     return [cache, false];
+  } finally {
+    clearTimeout(timer);
   }
 }
 function shouldRefreshBeforeRender(cachePath, payload, now) {
@@ -2457,6 +2485,7 @@ if (require.main === module) {
   quotaCacheWritePath,
   renderStatusline,
   runCli,
+  sameFrameRefreshBudgetMs,
   userConfigPath,
   version
 });

@@ -6,6 +6,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { strip } from "../src/ansi";
 import { defaultConfig } from "../src/config";
+import { RefreshResult } from "../src/quotaProbe";
 import {
   doctorDepsFromEnv,
   quotaCacheNeedsRefresh,
@@ -13,6 +14,7 @@ import {
   quotaCacheWritePath,
   renderStatusline,
   runCli,
+  sameFrameRefreshBudgetMs,
   version
 } from "../src/main";
 import childProcess, { execFileSync } from "node:child_process";
@@ -225,6 +227,60 @@ test("same-frame idle refresh targets the write path and reloads from it", async
 
   assert.deepEqual(seen, [fixture.writePath]);
   assert.match(out, /10% left/, "the HUD must render the cache reloaded from the write path");
+});
+
+test("same-frame refresh defaults to a 2000 ms budget", () => {
+  assert.equal(sameFrameRefreshBudgetMs, 2000);
+});
+
+test("a stalled same-frame refresh aborts within budget and the next idle frame renders without probing", async () => {
+  const fixture = homeFixture();
+  writeCache(fixture.writePath, 0.4, 10_000);
+  const originalCache = fs.readFileSync(fixture.writePath, "utf8");
+  writeRefreshState(fixture.writePath, "working");
+  const signals: (AbortSignal | undefined)[] = [];
+  const refresh = async (_cachePath: string, signal?: AbortSignal): Promise<RefreshResult> => {
+    signals.push(signal);
+    return new Promise(resolve => {
+      signal?.addEventListener("abort", () => resolve({ ok: false, message: "aborted" }), { once: true });
+    });
+  };
+
+  await runInHome(fixture, async () => {
+    let out = "";
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const started = performance.now();
+    try {
+      const code = await Promise.race([
+        runCli(["statusline"], {
+          stdin: Readable.from([versionedPayload("1.5.0")]),
+          stdout: chunk => { out += chunk; },
+          stderr: () => {},
+          refreshQuota: refresh,
+          sameFrameRefreshBudgetMs: 30
+        }),
+        new Promise<string>(resolve => { watchdog = setTimeout(() => resolve("deadline missed"), 250); })
+      ]);
+      assert.equal(code, 0, "statusline must finish within the injected budget plus a small margin");
+      assert.ok(performance.now() - started < 250);
+      assert.equal(signals.length, 1);
+      assert.equal(signals[0]?.aborted, true, "the in-flight probe must receive cancellation");
+      assert.match(strip(out), /40% left/, "render the pre-existing cache after timeout");
+      assert.equal(fs.readFileSync(fixture.writePath, "utf8"), originalCache);
+      assert.equal(fs.existsSync(authRejectedPath(fixture)), false, "a timeout is not an authentication rejection");
+      assert.equal(JSON.parse(fs.readFileSync(`${fixture.writePath}.statusline.json`, "utf8")).agentState, "idle");
+      assert.equal(await waitForSpawn(fixture.markerPath), true, "a timed-out same-frame refresh must still allow background refresh");
+
+      await runCli(["statusline"], {
+        stdin: Readable.from([statuslinePayload("idle")]),
+        stdout: () => {}, stderr: () => {}, refreshQuota: refresh,
+        sameFrameRefreshBudgetMs: 30
+      });
+      assert.equal(signals.length, 1, "the next idle frame must not repeat the synchronous refresh");
+    } finally {
+      clearTimeout(watchdog);
+    }
+  });
 });
 
 test("background refresh writes lock and state under the new path only", async () => {

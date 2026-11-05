@@ -12,6 +12,7 @@ import { Payload, render } from "./statusline";
 import { DoctorDeps, collectDoctorReport, formatDoctorReport } from "./doctor";
 
 export const version = "0.1.14";
+export const sameFrameRefreshBudgetMs = 2000;
 
 const consumedQuotaRefreshMs = 15 * 1000;
 const untouchedQuotaRefreshMs = 30 * 1000;
@@ -214,7 +215,8 @@ interface CliDeps {
   stdin?: NodeJS.ReadableStream;
   stdout?: WriteFn;
   stderr?: WriteFn;
-  refreshQuota?: (cachePath: string) => Promise<RefreshResult>;
+  refreshQuota?: (cachePath: string, signal?: AbortSignal) => Promise<RefreshResult>;
+  sameFrameRefreshBudgetMs?: number;
   usageQuota?: () => Promise<UsageOutcome>;
   doctorDeps?: Partial<DoctorDeps>;
 }
@@ -317,9 +319,10 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
       cachePath,
       ok ? cache : null,
       payload,
-      deps.refreshQuota ?? refreshQuota,
+      deps.refreshQuota ?? ((cachePath, signal) => refreshQuota(cachePath, undefined, signal)),
       cliVersion,
-      probeRejected
+      probeRejected,
+      deps.sameFrameRefreshBudgetMs ?? sameFrameRefreshBudgetMs
     );
     // A same-frame refresh already rewrote the write path, so a corrupt primary is repaired by now.
     // Passing the stale flag on would spawn a second probe for damage that no longer exists.
@@ -421,15 +424,28 @@ async function refreshQuotaBeforeRenderIfNeeded(
   cachePath: string,
   cache: Cache | null,
   payload: Payload | null,
-  refresh: (cachePath: string) => Promise<RefreshResult>,
+  refresh: (cachePath: string, signal?: AbortSignal) => Promise<RefreshResult>,
   cliVersion: string,
-  probeRejected: boolean
+  probeRejected: boolean,
+  budgetMs: number
 ): Promise<[Cache | null, boolean]> {
   if (probeRejected || !shouldRefreshBeforeRender(cachePath, payload, new Date())) {
     return [cache, false];
   }
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await refresh(cachePath);
+    const deadline = new Promise<null>(resolve => {
+      timer = setTimeout(() => {
+        // Settle the deadline first, even if an injected refresh reports success on cancellation.
+        resolve(null);
+        controller.abort();
+      }, budgetMs);
+    });
+    const result = await Promise.race([refresh(cachePath, controller.signal), deadline]);
+    if (result === null || controller.signal.aborted) {
+      return [cache, false];
+    }
     recordAuthRejection(cachePath, result, cliVersion);
     if (!result.ok) {
       return [cache, false];
@@ -448,6 +464,8 @@ async function refreshQuotaBeforeRenderIfNeeded(
     return [freshCache, true];
   } catch {
     return [cache, false];
+  } finally {
+    clearTimeout(timer);
   }
 }
 

@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { AddressInfo } from "node:net";
+import net, { AddressInfo, Socket } from "node:net";
+import { once } from "node:events";
 import {
   buildQuotaCache, parseAgyServerInfos, parseLanguageServerInfo, parseListeningPorts, probeAuthRejected, queryLanguageServer,
-  refreshQuota
+  refreshQuota, loopbackRequestTimeoutMs
 } from "../src/quotaProbe";
 
 test("parseLanguageServerInfo extracts pid and csrf token", () => {
@@ -444,4 +445,100 @@ test("queryLanguageServer maps an HTTP 401 reply to the authentication rejection
   } finally {
     server.close();
   }
+});
+
+test("loopback requests use a 1500 ms timeout", () => {
+  assert.equal(loopbackRequestTimeoutMs, 1500);
+});
+
+for (const phase of ["HTTPS handshake", "HTTP response"]) {
+  test(`queryLanguageServer aborts a stalled ${phase} and closes the connection`, async () => {
+    const sockets = new Set<Socket>();
+    const server = phase === "HTTPS handshake" ? net.createServer(socket => socket.resume()) : http.createServer();
+    server.on("connection", socket => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const controller = new AbortController();
+    const ready = once(server, phase === "HTTPS handshake" ? "connection" : "request");
+    const pending = queryLanguageServer((server.address() as AddressInfo).port, "", controller.signal);
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const [connection] = await ready;
+      const socket: Socket = phase === "HTTPS handshake" ? connection : connection.socket;
+      const closed = once(socket, "close");
+      const started = performance.now();
+      controller.abort();
+      const result = await Promise.race([
+        Promise.all([pending, closed]).then(([reply]) => reply),
+        new Promise<string>(resolve => { watchdog = setTimeout(() => resolve("abort did not close request"), 400); })
+      ]);
+      assert.equal(result, null, "abort must resolve null and close the server connection promptly");
+      assert.ok(performance.now() - started < 400, "cancellation must finish well before the per-request timeout");
+    } finally {
+      clearTimeout(watchdog);
+      controller.abort();
+      const stopped = new Promise<void>(resolve => server.close(() => resolve()));
+      for (const socket of sockets) socket.destroy();
+      await stopped;
+      await pending;
+    }
+  });
+}
+
+test("an already-aborted refresh skips discovery and never publishes quota", async () => {
+  const { runtime, calls, files } = hintRuntime();
+  const controller = new AbortController();
+  controller.abort();
+  const result = await refreshQuota("/tmp/quota-aborted-test.json", runtime, controller.signal);
+  assert.equal(result.ok, false);
+  assert.notEqual(result.authRejected, true);
+  assert.equal(calls.ps, 0);
+  assert.deepEqual(calls.requests, []);
+  assert.deepEqual(files, {});
+});
+
+test("an aborted refresh stops walking remaining ports and candidates", async () => {
+  const { runtime, calls, files } = hintRuntime();
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | undefined;
+  runtime.ps = () => { calls.ps++; return "user 222 0.0 /opt/bin/agy\nuser 333 0.0 /opt/bin/agy"; };
+  runtime.lsof = () => {
+    calls.lsof++;
+    return "agy 222 user 9u IPv4 0 TCP 127.0.0.1:1111 (LISTEN)\nagy 222 user 9u IPv4 0 TCP 127.0.0.1:2222 (LISTEN)";
+  };
+  runtime.request = async (port: number, _token: string, signal?: AbortSignal) => {
+    calls.requests.push(port);
+    seenSignal = signal;
+    controller.abort();
+    return null;
+  };
+  const result = await refreshQuota("/tmp/quota-mid-abort-test.json", runtime, controller.signal);
+  assert.deepEqual(calls.requests, [1111], "abort must stop before probing the next port");
+  assert.equal(calls.lsof, 1, "abort must stop before discovering the next candidate");
+  assert.equal(seenSignal, controller.signal);
+  assert.equal(result.ok, false);
+  assert.notEqual(result.authRejected, true);
+  assert.deepEqual(files, {});
+});
+
+test("an aborted server-hint request does not fall back to discovery", async () => {
+  const { runtime, calls, files } = hintRuntime();
+  const cachePath = "/tmp/quota-hint-abort-test.json";
+  await refreshQuota(cachePath, runtime);
+  const before = { ...files };
+  calls.requests.length = 0;
+  const controller = new AbortController();
+  runtime.request = async port => {
+    calls.requests.push(port);
+    controller.abort();
+    return null;
+  };
+  const result = await refreshQuota(cachePath, runtime, controller.signal);
+  assert.equal(calls.ps, 1, "cancelled hint reuse must not rediscover servers");
+  assert.deepEqual(calls.requests, [2222]);
+  assert.equal(result.ok, false);
+  assert.notEqual(result.authRejected, true);
+  assert.deepEqual(files, before, "cancellation must leave the cache and hint untouched");
 });

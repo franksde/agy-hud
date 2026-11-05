@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The status line is no longer killed when a turn settles to idle (#18). The quota refresh it runs before that redraw now gets 2 seconds in total; past that it renders the cached quota, cancels the loopback probe and leaves the refresh to the background. A loopback port that accepted the connection but never answered used to hold the redraw for 10 seconds per port (5 s over HTTPS, then 5 s over HTTP), which reached the CLI's status-line timeout on Antigravity CLI 1.5.0, and because the killed run never saved its state, the next idle redraw tried again. Each loopback request now times out after 1.5 seconds.
+
 ## 0.1.14 — 2026-10-22
 
 - Added Windows support (#17, by @avometre): `hooks/status-line.cmd` starts the bundle with the first `node.exe` on `PATH`, exits without starting Node inside the nested `agy -p /usage` run, and exits 127 when there is no `node.exe`. It finds node through `PATH` alone and names every other program by its full path, because `cmd.exe` would otherwise run a `node.bat` or `more.com` from the current directory, which is the user's workspace. It does not search version-manager directories as `hooks/status-line.sh` does. The release archive now ships it, checked out with CRLF line endings, and both READMEs give the Windows `/statusline`, install and icons-off commands, and how to wire a path that contains a space.

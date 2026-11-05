@@ -4,6 +4,8 @@ import https from "node:https";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+export const loopbackRequestTimeoutMs = 1500;
+
 export interface LanguageServerInfo {
   pid: string;
   csrfToken: string;
@@ -13,7 +15,7 @@ export interface LanguageServerInfo {
 export interface ProbeRuntime {
   ps(): string;
   lsof(pid: string): string;
-  request(port: number, csrfToken: string): Promise<unknown | null>;
+  request(port: number, csrfToken: string, signal?: AbortSignal): Promise<unknown | null>;
   now(): Date;
   writeFile(filePath: string, data: string): void;
   mkdir(dirPath: string): void;
@@ -133,7 +135,9 @@ export function buildQuotaCache(rawResponse: unknown, now: Date): { cache: unkno
   return { cache, summary: lines.join("\n") };
 }
 
-export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = defaultRuntime()): Promise<RefreshResult> {
+export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = defaultRuntime(), signal?: AbortSignal): Promise<RefreshResult> {
+  const aborted: RefreshResult = { ok: false, message: "Quota refresh aborted." };
+  if (signal?.aborted) return aborted;
   // Discovery reads the process list with ps and the listening ports with lsof, neither of which
   // Windows has. From CLI 1.2.2 on the loopback refuses the status line on every platform anyway, so
   // this is reported as that refusal, which routes the refresh to /usage with its pacing and backoff.
@@ -145,8 +149,10 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
     };
   }
   const hint = loadServerHint(cachePath, runtime);
+  if (signal?.aborted) return aborted;
   if (hint) {
-    const raw = await tryRequest(runtime, hint.port, "");
+    const raw = await tryRequest(runtime, hint.port, "", signal);
+    if (signal?.aborted) return aborted;
     const built = buildQuotaCache(raw, runtime.now());
     if (built) return saveQuotaCache(cachePath, built, runtime);
     // This is a disposable discovery hint, never quota or credentials. A concurrent replacement
@@ -164,6 +170,7 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
   let sawResponse = false;
   let sawAuthRejection = false;
   for (const info of candidates) {
+    if (signal?.aborted) return aborted;
     // Identity is required only for hint reuse. If targeted inspection fails, full discovery
     // must remain available; the optional optimization must never disable quota refreshes.
     const identity = info.kind === "agy" ? processIdentity(runtime, info.pid) : null;
@@ -177,7 +184,9 @@ export async function refreshQuota(cachePath: string, runtime: ProbeRuntime = de
       sawPort = true;
     }
     for (const port of ports) {
-      const rawResponse = await tryRequest(runtime, port, info.csrfToken);
+      if (signal?.aborted) return aborted;
+      const rawResponse = await tryRequest(runtime, port, info.csrfToken, signal);
+      if (signal?.aborted) return aborted;
       if (rawResponse === probeAuthRejected) {
         sawAuthRejection = true;
         continue;
@@ -254,9 +263,9 @@ function saveServerHint(cachePath: string, hint: ServerHint | null, runtime: Pro
   }
 }
 
-async function tryRequest(runtime: ProbeRuntime, port: number, csrfToken: string): Promise<unknown | null> {
+async function tryRequest(runtime: ProbeRuntime, port: number, csrfToken: string, signal?: AbortSignal): Promise<unknown | null> {
   try {
-    return await runtime.request(port, csrfToken);
+    return await runtime.request(port, csrfToken, signal);
   } catch {
     return null;
   }
@@ -284,7 +293,8 @@ function defaultRuntime(): ProbeRuntime {
   };
 }
 
-export async function queryLanguageServer(port: number, csrfToken: string): Promise<unknown | null> {
+export async function queryLanguageServer(port: number, csrfToken: string, signal?: AbortSignal): Promise<unknown | null> {
+  if (signal?.aborted) return null;
   const endpoint = `/exa.language_server_pb.LanguageServerService/GetUserStatus`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -300,8 +310,10 @@ export async function queryLanguageServer(port: number, csrfToken: string): Prom
     path: endpoint,
     method: "POST",
     headers,
-    rejectUnauthorized: false
+    rejectUnauthorized: false,
+    signal
   });
+  if (signal?.aborted) return null;
   if (httpsResult !== null) {
     return httpsResult;
   }
@@ -311,7 +323,8 @@ export async function queryLanguageServer(port: number, csrfToken: string): Prom
     port,
     path: endpoint,
     method: "POST",
-    headers
+    headers,
+    signal
   });
 }
 
@@ -339,7 +352,7 @@ function requestJson(
         }
       });
     });
-    req.setTimeout(5000, () => {
+    req.setTimeout(loopbackRequestTimeoutMs, () => {
       req.destroy();
       resolve(null);
     });
