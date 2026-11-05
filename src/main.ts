@@ -13,6 +13,11 @@ import { DoctorDeps, collectDoctorReport, formatDoctorReport } from "./doctor";
 
 export const version = "0.1.14";
 export const sameFrameRefreshBudgetMs = 2000;
+// Antigravity CLI can leave the status line's stdin open after the payload, or never write one
+// (antigravity-cli#698), and kills a status line that has not exited within its timeout. So the
+// payload counts as read once it parses as a complete JSON object, and a stdin that has produced
+// none by this deadline is given up on.
+export const stdinTimeoutMs = 1000;
 
 const consumedQuotaRefreshMs = 15 * 1000;
 const untouchedQuotaRefreshMs = 30 * 1000;
@@ -217,6 +222,7 @@ interface CliDeps {
   stderr?: WriteFn;
   refreshQuota?: (cachePath: string, signal?: AbortSignal) => Promise<RefreshResult>;
   sameFrameRefreshBudgetMs?: number;
+  stdinTimeoutMs?: number;
   usageQuota?: () => Promise<UsageOutcome>;
   doctorDeps?: Partial<DoctorDeps>;
 }
@@ -304,11 +310,11 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
       // The status line of the agy that a /usage refresh started. Print mode never shows it, so it
       // only drains its input, as hooks/status-line.sh does: it must not refresh again, and its
       // print-mode agent states must not overwrite the interactive session's refresh state.
-      await readStdin(deps.stdin ?? process.stdin);
+      await readStdin(deps.stdin ?? process.stdin, deps.stdinTimeoutMs ?? stdinTimeoutMs);
       return 0;
     }
     const cfg = loadFromPaths(configPaths());
-    const raw = await readStdin(deps.stdin ?? process.stdin);
+    const raw = await readStdin(deps.stdin ?? process.stdin, deps.stdinTimeoutMs ?? stdinTimeoutMs);
     const payload = parsePayload(raw);
     const cachePath = quotaCacheWritePath();
     const [cache, ok, primaryUnloadable] = loadQuotaFromCandidates(quotaCacheReadCandidates());
@@ -407,17 +413,49 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
   return 2;
 }
 
-function readStdin(stdin: NodeJS.ReadableStream): Promise<string> {
+function readStdin(stdin: NodeJS.ReadableStream, timeoutMs: number): Promise<string> {
   return new Promise(resolve => {
     let raw = "";
-    stdin.setEncoding("utf8");
-    stdin.on("data", chunk => {
-      raw += chunk;
-    });
-    stdin.on("end", () => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      stdin.removeListener("data", onData);
+      stdin.removeListener("end", finish);
+      stdin.removeListener("error", finish);
+      // An open pipe that is still being read keeps the process alive after the line is printed.
+      stdin.pause();
+      (stdin as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
       resolve(raw);
-    });
+    };
+    const onData = (chunk: string) => {
+      raw += chunk;
+      if (isCompleteJsonObject(raw)) {
+        finish();
+      }
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    stdin.setEncoding("utf8");
+    stdin.on("data", onData);
+    stdin.on("end", finish);
+    stdin.on("error", finish);
   });
+}
+
+function isCompleteJsonObject(raw: string): boolean {
+  const text = raw.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return false;
+  }
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function refreshQuotaBeforeRenderIfNeeded(

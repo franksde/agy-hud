@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The status line is no longer killed when a turn settles to idle (#18). The quota refresh it runs before that redraw now gets 2 seconds in total; past that it renders the cached quota, cancels the loopback probe and leaves the refresh to the background. A loopback port that accepted the connection but never answered used to hold the redraw for 10 seconds per port (5 s over HTTPS, then 5 s over HTTP), which reached the CLI's status-line timeout on Antigravity CLI 1.5.0, and because the killed run never saved its state, the next idle redraw tried again. Each loopback request now times out after 1.5 seconds.
+- The status line no longer waits for the CLI to close stdin. It renders as soon as a complete JSON payload has arrived, and gives up after 1 second on a stdin that has produced none. Antigravity CLI can hold the pipe open ([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)); a status line waiting for end of input was then killed, and 30 kills in a row turn the status line off. The nested `/usage` status line stops waiting the same way.
 
 ## 0.1.14 — 2026-10-22
 

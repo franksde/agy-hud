@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { strip } from "../src/ansi";
 import { defaultConfig } from "../src/config";
 import { RefreshResult } from "../src/quotaProbe";
@@ -15,6 +15,7 @@ import {
   renderStatusline,
   runCli,
   sameFrameRefreshBudgetMs,
+  stdinTimeoutMs,
   version
 } from "../src/main";
 import childProcess, { execFileSync } from "node:child_process";
@@ -724,6 +725,74 @@ test("dist bundle CLI smoke test", () => {
   const env = sandboxedEnv();
   assert.equal(execFileSync(process.execPath, [entry, "version"], { encoding: "utf8", env }), `${packageVersion}\n`);
   assert.equal(execFileSync(process.execPath, [entry, "statusline"], { input: "", encoding: "utf8", env }), "agy-hud\n");
+});
+
+// Antigravity CLI can leave the status line's stdin open after writing the payload, or never write
+// it at all (antigravity-cli#698). A status line that waits for EOF is then killed and, after 30
+// kills in a row, switched off. These run the real entry point with the pipe held open.
+async function runWithStdinHeldOpen(
+  input: string,
+  env: NodeJS.ProcessEnv
+): Promise<{ exited: boolean; code: number | null; stdout: string; elapsedMs: number }> {
+  const entry = path.join(__dirname, "..", "src", "main.js");
+  const child = childProcess.spawn(process.execPath, [entry, "statusline"], { env, stdio: ["pipe", "pipe", "ignore"] });
+  let stdout = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", chunk => { stdout += chunk; });
+  const started = performance.now();
+  if (input !== "") child.stdin.write(input);
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const exited = await Promise.race([
+      new Promise<true>(resolve => child.once("exit", () => resolve(true))),
+      new Promise<false>(resolve => { watchdog = setTimeout(() => resolve(false), 4000); })
+    ]);
+    return { exited, code: child.exitCode, stdout, elapsedMs: performance.now() - started };
+  } finally {
+    clearTimeout(watchdog);
+    child.stdin.destroy();
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
+}
+
+test("statusline renders and exits when the CLI keeps stdin open after the payload", async () => {
+  const result = await runWithStdinHeldOpen(statuslinePayload("idle"), sandboxedEnv());
+  assert.equal(result.exited, true, "the status line must not wait for an EOF that never comes");
+  assert.equal(result.code, 0);
+  assert.match(strip(result.stdout), /3\.5 Flash High/, "the payload that did arrive must be rendered");
+  assert.ok(result.elapsedMs < 2000, `took ${Math.round(result.elapsedMs)} ms`);
+});
+
+test("statusline gives up on stdin that stays open and empty", async () => {
+  const result = await runWithStdinHeldOpen("", sandboxedEnv());
+  assert.equal(result.exited, true, "an open, silent stdin must not hold the status line until it is killed");
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, "agy-hud\n");
+});
+
+test("the nested /usage status line also stops waiting on an open stdin", async () => {
+  const result = await runWithStdinHeldOpen("", { ...sandboxedEnv(), AGY_HUD_NESTED: "1" });
+  assert.equal(result.exited, true);
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, "");
+});
+
+test("statusline waits for a payload that arrives in pieces", { timeout: 3000 }, async () => {
+  const fixture = homeFixture();
+  const payload = statuslinePayload("idle");
+  const stdin = new PassThrough();
+  stdin.write(payload.slice(0, 20));
+  setTimeout(() => stdin.write(payload.slice(20)), 30);
+  let out = "";
+  await runInHome(fixture, async () => {
+    const code = await runCli(["statusline"], { stdin, stdout: chunk => { out += chunk; }, stderr: () => {}, stdinTimeoutMs: 500 });
+    assert.equal(code, 0);
+  });
+  assert.match(strip(out), /3\.5 Flash High/, "a partial payload must not be rendered as if it were complete");
+});
+
+test("statusline stdin wait defaults to one second", () => {
+  assert.equal(stdinTimeoutMs, 1000);
 });
 
 test("CLI quota refresh does not fall through to usage", async () => {
