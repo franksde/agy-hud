@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { ChildProcess, spawn } from "node:child_process";
 import { CachedQuotaBucket } from "./quota";
 
 // Antigravity CLI 1.2.2+ refuses the loopback probe for want of a CSRF token it never gives the
@@ -73,6 +73,10 @@ export function parseUsageOutput(stdout: string): Record<string, CachedQuotaBuck
   return Object.keys(quota).length > 0 ? quota : null;
 }
 
+const scratchPrefix = "agy-hud-usage-";
+// Far longer than a run, which the timeout caps at 45 s by default.
+const staleScratchMs = 60 * 60 * 1000;
+
 export interface RunAgyOptions {
   command?: string;
   timeoutMs?: number;
@@ -81,13 +85,15 @@ export interface RunAgyOptions {
 }
 
 // Runs agy from a fresh private directory, so no workspace rules or customizations load, and removes
-// the directory afterwards. The output is capped and the run is killed at the timeout.
+// the directory afterwards. The output is capped and the run is killed at the timeout. A helper agy
+// leaves running can keep that directory busy on Windows, so each run first sweeps away stale ones.
 export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOptions = {}): Promise<UsageRunResult> {
   const { command = "agy", timeoutMs = 45 * 1000, maxBytes = 1024 * 1024, platform = process.platform } = options;
   return new Promise(resolve => {
     let scratch: string;
     try {
-      scratch = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-usage-"));
+      sweepStaleScratch(os.tmpdir());
+      scratch = fs.mkdtempSync(path.join(os.tmpdir(), scratchPrefix));
     } catch (error) {
       resolve({ code: null, stdout: "", timedOut: false, error: String(error) });
       return;
@@ -117,12 +123,18 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
     // that asks for a new console of its own still gets a window; nothing set here can prevent that.
     const detached = platform !== "win32";
     const child = spawn(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached, windowsHide: true });
+    let treeKillStarted = false;
     const killGroup = () => {
+      if (platform === "win32") {
+        // Once is enough, and every chunk past the output cap would otherwise start another taskkill.
+        if (treeKillStarted) return;
+        treeKillStarted = true;
+        killWindowsTree(child);
+        return;
+      }
       try {
         if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
       } catch {
-        // Windows has no POSIX process group to signal, so this reaches agy alone. finish() lets go
-        // of the pipe, so a helper it leaves behind still cannot hold the refresh open.
         child.kill("SIGKILL");
       }
     };
@@ -156,4 +168,50 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+// Windows has no process group to signal. taskkill /T ends agy and everything it started, such as an
+// MCP server that would otherwise outlive the refresh. It finds them by parent pid, so it runs before
+// any direct kill, while agy is still alive. Once agy has exited it runs no more: Windows may already
+// have given the pid to another process, and agy's leftovers cannot be found by it anyway; finish()
+// letting go of the pipe is what keeps them from holding the refresh open. taskkill is named by full
+// path because Windows looks up a bare name in the current directory first. If it cannot run or
+// fails, agy alone is killed.
+function killWindowsTree(child: ChildProcess): void {
+  const fallback = () => {
+    child.kill("SIGKILL");
+  };
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    const taskkill = path.win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+    const killer = spawn(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5000 });
+    killer.on("error", fallback);
+    killer.on("exit", code => {
+      if (code !== 0) fallback();
+    });
+  } catch {
+    fallback();
+  }
+}
+
+// Removes agy-hud-usage-* directories under `root` last modified over an hour ago. Best effort: one
+// still busy, or not ours to remove, is left for a later run.
+export function sweepStaleScratch(root: string, now: number = Date.now()): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(scratchPrefix)) continue;
+    const dir = path.join(root, name);
+    try {
+      const stat = fs.lstatSync(dir);
+      if (!stat.isDirectory() || now - stat.mtimeMs < staleScratchMs) continue;
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Try again on a later run.
+    }
+  }
 }

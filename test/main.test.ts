@@ -19,6 +19,7 @@ import {
   version
 } from "../src/main";
 import childProcess, { execFileSync } from "node:child_process";
+import { captureSpawn } from "./spawnCapture";
 
 function withEnv(overrides: Record<string, string | undefined>, run: () => void): void {
   const saved: Record<string, string | undefined> = {};
@@ -1201,6 +1202,22 @@ test("doctorDepsFromEnv reads the real environment without throwing", () => {
   assert.equal(deps.readFile("/definitely/not/a/file.json"), null);
 });
 
+// doctor runs in the user's workspace. On Windows a bare program name is looked up in the current
+// directory before PATH, so a repository could ship an agy.exe that doctor would run; and a console
+// program started from a host without a console opens a window unless hidden.
+test("agy plugin list runs hidden and outside the current directory", t => {
+  const seen: Array<{ file: string; options: childProcess.ExecFileSyncOptions }> = [];
+  t.mock.method(childProcess, "execFileSync", (file: string, _args: string[], options: childProcess.ExecFileSyncOptions) => {
+    seen.push({ file, options });
+    return "[]";
+  });
+  assert.equal(doctorDepsFromEnv().pluginList?.(), "[]");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].file, "agy");
+  assert.equal(seen[0].options.windowsHide, true);
+  assert.equal(seen[0].options.cwd, os.tmpdir());
+});
+
 test("doctorDepsFromEnv lists installed plugins through agy plugin list --json", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-plugin-list-"));
   const fake = path.join(dir, "agy");
@@ -1535,21 +1552,16 @@ test("the background refresh is spawned with its lock token", async () => {
 // The background refresh is detached, so it outlives the status-line run. windowsHide is a guard against
 // a console window on Windows; agy's own console is handled in runAgy.
 test("the background refresh is spawned without a console window", async t => {
-  const seen: childProcess.SpawnOptions[] = [];
-  const original = childProcess.spawn;
-  t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
-    seen.push(args[2] as childProcess.SpawnOptions);
-    return (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
-  });
+  const calls = captureSpawn(t);
   const fixture = homeFixture();
   writeCache(fixture.writePath, 0.4, 10 * 60_000);
   writeRefreshState(fixture.writePath, "working");
   writeAuthRejected(fixture, "1.2.11");
   await runStatuslineInHome(fixture, versionedPayload("1.2.11", "working"));
   assert.equal(await waitForSpawn(fixture.markerPath), true);
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].detached, true);
-  assert.equal(seen[0].windowsHide, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.detached, true);
+  assert.equal(calls[0].options.windowsHide, true);
 });
 
 test("a /usage success whose cache write fails still backs off", async () => {

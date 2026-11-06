@@ -4,8 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import childProcess from "node:child_process";
-import { parseUsageOutput, queryUsage, runAgy, usageArgs } from "../src/usageCommand";
+import { EventEmitter } from "node:events";
+import { parseUsageOutput, queryUsage, runAgy, sweepStaleScratch, usageArgs } from "../src/usageCommand";
 import { writeFakeExecutable } from "./fakeExecutable";
+import { captureSpawn } from "./spawnCapture";
 
 // Shape of `agy -p /usage --output-format json` on Antigravity CLI 1.2.11, identity fields omitted.
 function usageJson(buckets: unknown[] = [
@@ -145,38 +147,120 @@ test("runAgy sends no signal after a run has settled", async () => {
   assert.deepEqual(killed, [], "a clean run must not be followed by a group kill");
 });
 
-// On Windows, detached means DETACHED_PROCESS, and CREATE_NO_WINDOW, which windowsHide would add, is
-// ignored alongside it. agy then has no console, and an ordinary console program it starts (cmd.exe, an
-// MCP server) opens a visible one of its own (issue #19). Off Windows, detached puts agy in its own
-// process group, which the timeout kill relies on. A Windows console cannot be observed from here, so
-// the test pins the spawn options.
+// On Windows, detached means DETACHED_PROCESS, and CREATE_NO_WINDOW, which windowsHide adds when no
+// stdio is inherited, is ignored alongside it. agy then has no console, and an ordinary console program
+// it starts (cmd.exe, an MCP server) opens a visible one of its own (issue #19). Off Windows, detached
+// puts agy in its own process group, which the timeout kill relies on. A Windows console cannot be
+// observed from here, so the test pins the spawn options, stdio included: an inherited stream would
+// drop CREATE_NO_WINDOW.
 async function spawnOptionsOn(t: TestContext, platform: NodeJS.Platform): Promise<childProcess.SpawnOptions> {
-  const seen: childProcess.SpawnOptions[] = [];
-  const original = childProcess.spawn;
-  const mock = t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
-    seen.push(args[2] as childProcess.SpawnOptions);
-    return (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
-  });
-  try {
-    const { command } = fakeAgy("echo ok");
-    await runAgy([], process.env, { command, platform });
-  } finally {
-    mock.mock.restore();
-  }
-  assert.equal(seen.length, 1);
-  return seen[0];
+  const calls = captureSpawn(t);
+  const { command } = fakeAgy("echo ok");
+  await runAgy([], process.env, { command, platform });
+  assert.equal(calls.length, 1);
+  return calls[0].options;
 }
 
 test("runAgy does not detach agy on Windows, so the consoles agy opens stay hidden", async t => {
   const options = await spawnOptionsOn(t, "win32");
   assert.equal(options.detached, false);
   assert.equal(options.windowsHide, true);
+  assert.deepEqual(options.stdio, ["ignore", "pipe", "ignore"]);
 });
 
-test("runAgy detaches agy into its own process group off Windows", async t => {
-  for (const platform of ["darwin", "linux"] as const) {
+for (const platform of ["darwin", "linux"] as const) {
+  test(`runAgy detaches agy into its own process group on ${platform}`, async t => {
     const options = await spawnOptionsOn(t, platform);
-    assert.equal(options.detached, true, platform);
-    assert.equal(options.windowsHide, true, platform);
-  }
+    assert.equal(options.detached, true);
+    assert.equal(options.windowsHide, true);
+  });
+}
+
+// Windows has no process group to signal, so a timed-out agy would leave its MCP servers behind. taskkill
+// /T ends agy and everything it started. It finds them by parent pid, so it must run while agy is still
+// alive, before any direct kill. If taskkill fails, agy itself is still killed.
+test("runAgy ends agy's whole process tree with taskkill on Windows", async t => {
+  const calls = captureSpawn(t, call => {
+    if (!/taskkill\.exe$/i.test(call.file)) return undefined;
+    const fake = new EventEmitter();
+    setImmediate(() => fake.emit("exit", 128, null));
+    return fake as childProcess.ChildProcess;
+  });
+  const killSpy = t.mock.method(process, "kill");
+  const { command } = fakeAgy("sleep 5");
+  const started = Date.now();
+  const result = await runAgy([], process.env, { command, timeoutMs: 200, platform: "win32" });
+  assert.equal(result.timedOut, true);
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+  assert.equal(calls.length, 2);
+  const killer = calls[1];
+  assert.match(killer.file, /[\\/]System32[\\/]taskkill\.exe$/i);
+  assert.deepEqual(killer.args.slice(0, 3), ["/T", "/F", "/PID"]);
+  assert.ok(Number(killer.args[3]) > 0);
+  assert.equal(killer.args.length, 4);
+  assert.equal(killer.options.windowsHide, true);
+  assert.equal(killer.options.stdio, "ignore");
+  assert.ok(!killSpy.mock.calls.some(call => typeof call.arguments[0] === "number" && call.arguments[0] < 0),
+    "no POSIX group kill on Windows");
+});
+
+// Once agy has exited, Windows may hand its pid to another process, so no taskkill may target it then.
+test("runAgy runs no taskkill on Windows after agy has exited", async t => {
+  const calls = captureSpawn(t, call => {
+    if (!/taskkill\.exe$/i.test(call.file)) return undefined;
+    const fake = new EventEmitter();
+    setImmediate(() => fake.emit("exit", 0, null));
+    return fake as childProcess.ChildProcess;
+  });
+  const { command } = fakeAgy("(sleep 5 &); echo '{\"ok\":1}'");
+  const result = await runAgy([], process.env, { command, timeoutMs: 4000, platform: "win32" });
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls.map(call => call.file), [command]);
+});
+
+test("runAgy does not run taskkill off Windows", async t => {
+  const calls = captureSpawn(t);
+  const { command } = fakeAgy("sleep 5");
+  const result = await runAgy([], process.env, { command, timeoutMs: 200, platform: "linux" });
+  assert.equal(result.timedOut, true);
+  assert.deepEqual(calls.map(call => call.file), [command]);
+});
+
+// A helper agy leaves running can keep its scratch directory busy on Windows, so the removal after the
+// run fails. Each run first removes scratch directories an earlier run left behind over an hour ago.
+test("sweepStaleScratch removes only old agy-hud-usage directories", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-sweep-"));
+  const now = Date.now();
+  const old = new Date(now - 2 * 60 * 60 * 1000);
+  const make = (name: string, mtime?: Date) => {
+    const dir = path.join(root, name);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, "f"), "x");
+    if (mtime) fs.utimesSync(dir, mtime, mtime);
+    return dir;
+  };
+  const stale = make("agy-hud-usage-stale", old);
+  const fresh = make("agy-hud-usage-fresh");
+  const foreign = make("someone-else-old", old);
+  fs.writeFileSync(path.join(root, "agy-hud-usage-file"), "x");
+  fs.utimesSync(path.join(root, "agy-hud-usage-file"), old, old);
+  sweepStaleScratch(root, now);
+  assert.equal(fs.existsSync(stale), false);
+  assert.equal(fs.existsSync(fresh), true);
+  assert.equal(fs.existsSync(foreign), true);
+  assert.equal(fs.existsSync(path.join(root, "agy-hud-usage-file")), true, "only directories are swept");
+  sweepStaleScratch(path.join(root, "missing"), now);
+});
+
+test("runAgy sweeps stale scratch directories before it runs", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-tmproot-"));
+  const stale = path.join(root, "agy-hud-usage-left");
+  fs.mkdirSync(stale);
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(stale, old, old);
+  t.mock.method(os, "tmpdir", () => root);
+  const { command } = fakeAgy("echo ok");
+  const result = await runAgy([], process.env, { command });
+  assert.equal(result.code, 0);
+  assert.equal(fs.existsSync(stale), false);
 });

@@ -657,12 +657,15 @@ function parseUsageOutput(stdout) {
   }
   return Object.keys(quota).length > 0 ? quota : null;
 }
+var scratchPrefix = "agy-hud-usage-";
+var staleScratchMs = 60 * 60 * 1e3;
 function runAgy(args, env, options = {}) {
   const { command = "agy", timeoutMs = 45 * 1e3, maxBytes = 1024 * 1024, platform = process.platform } = options;
   return new Promise((resolve) => {
     let scratch;
     try {
-      scratch = import_node_fs4.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), "agy-hud-usage-"));
+      sweepStaleScratch(import_node_os.default.tmpdir());
+      scratch = import_node_fs4.default.mkdtempSync(import_node_path2.default.join(import_node_os.default.tmpdir(), scratchPrefix));
     } catch (error) {
       resolve({ code: null, stdout: "", timedOut: false, error: String(error) });
       return;
@@ -684,7 +687,14 @@ function runAgy(args, env, options = {}) {
     };
     const detached = platform !== "win32";
     const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached, windowsHide: true });
+    let treeKillStarted = false;
     const killGroup = () => {
+      if (platform === "win32") {
+        if (treeKillStarted) return;
+        treeKillStarted = true;
+        killWindowsTree(child);
+        return;
+      }
       try {
         if (child.pid !== void 0) process.kill(-child.pid, "SIGKILL");
       } catch {
@@ -718,6 +728,40 @@ function runAgy(args, env, options = {}) {
 }
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function killWindowsTree(child) {
+  const fallback = () => {
+    child.kill("SIGKILL");
+  };
+  if (child.pid === void 0 || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    const taskkill = import_node_path2.default.win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+    const killer = (0, import_node_child_process2.spawn)(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5e3 });
+    killer.on("error", fallback);
+    killer.on("exit", (code) => {
+      if (code !== 0) fallback();
+    });
+  } catch {
+    fallback();
+  }
+}
+function sweepStaleScratch(root, now = Date.now()) {
+  let names;
+  try {
+    names = import_node_fs4.default.readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(scratchPrefix)) continue;
+    const dir = import_node_path2.default.join(root, name);
+    try {
+      const stat = import_node_fs4.default.lstatSync(dir);
+      if (!stat.isDirectory() || now - stat.mtimeMs < staleScratchMs) continue;
+      import_node_fs4.default.rmSync(dir, { recursive: true, force: true });
+    } catch {
+    }
+  }
 }
 
 // src/gitinfo.ts
@@ -1925,6 +1969,8 @@ function fcList() {
 function agyPluginList() {
   try {
     return (0, import_node_child_process3.execFileSync)("agy", ["plugin", "list", "--json"], {
+      cwd: import_node_os2.default.tmpdir(),
+      windowsHide: true,
       encoding: "utf8",
       timeout: 5e3,
       maxBuffer: 8 * 1024 * 1024,

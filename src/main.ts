@@ -248,10 +248,14 @@ function fcList(): string | null {
 }
 
 // Antigravity CLI 1.3.4+ lists installed plugins as JSON; older CLIs print an error, which doctor
-// reports as unknown. Only doctor runs this, never the status line.
+// reports as unknown. Only doctor runs this, never the status line. It runs outside the user's
+// workspace, because Windows looks up a bare program name in the current directory before PATH, and
+// hidden, so no console window opens when doctor runs without one.
 function agyPluginList(): string | null {
   try {
     return execFileSync("agy", ["plugin", "list", "--json"], {
+      cwd: os.tmpdir(),
+      windowsHide: true,
       encoding: "utf8",
       timeout: 5000,
       maxBuffer: 8 * 1024 * 1024,
