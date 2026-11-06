@@ -247,6 +247,17 @@ test("runAgy kills agy directly on Windows when taskkill fails", async t => {
   assert.equal(killers[0].file, "D:\\Win\\System32\\taskkill.exe", "windir stands in for a missing SystemRoot");
 });
 
+// The stand-in taskkill reports success without ending agy, so agy keeps writing past the cap and then
+// reaches the timeout, and each of those would start a taskkill of its own.
+test("runAgy runs taskkill once on Windows however many chunks pass the output cap", async t => {
+  const killers = captureTaskkill(t, 0);
+  const { command } = fakeAgy("head -c 200000 /dev/zero | tr '\\0' x; sleep 1");
+  const result = await runAgy([], process.env, { command, maxBytes: 1024, timeoutMs: 500, platform: "win32" });
+  assert.ok(result.stdout.length <= 1024);
+  assert.equal(result.timedOut, true);
+  assert.equal(killers.length, 1);
+});
+
 // Once agy has exited, Windows may hand its pid to another process, so no taskkill may target it then.
 test("runAgy runs no taskkill on Windows after agy has exited", async t => {
   const killers = captureTaskkill(t, 0);

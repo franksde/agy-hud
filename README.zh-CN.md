@@ -479,4 +479,4 @@ npm test
 
 在配额刷新启动的 `agy -p /usage` 运行中,`hooks/status-line.sh` 和 `hooks/status-line.cmd` 会把状态栏输入读到结束再退出,不启动 Node。如果 CLI 一直不关闭这个管道([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)),hook 会一直等到被 CLI 终止。这次运行是 print 模式,本来就不显示状态栏;在 Antigravity CLI 1.5.1 上实测,这个管道会正常关闭。
 
-在 Windows 上,`doctor` 按文本比较路径,所以用 8.3 短路径接入的状态栏会被当成已安装目录之外的另一份拷贝。`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑。`/usage` 超时时用 `taskkill /T` 结束,`agy` 还在运行时它启动的辅助进程会一并结束;`agy` 已经退出后才遗留下来的辅助进程这样找不到。CI 只在 Linux 上运行。贡献者提交的 hook 在 Windows 11 + Antigravity CLI 1.4.4 上手动验证过;之后针对 Windows 的改动(`/usage` 路径及其启动和结束 `agy` 的方式、doctor 的 Windows 路径、加固后的 hook)有 Linux 和 macOS 上的测试覆盖,但还没有在 Windows 上实际运行过。
+在 Windows 上,`doctor` 按文本比较路径,所以用 8.3 短路径接入的状态栏会被当成已安装目录之外的另一份拷贝。`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑。`/usage` 超时或输出超限时用 `taskkill /T` 结束,`agy` 还在运行时它启动的辅助进程会一并结束;`agy` 已经退出后才遗留下来的辅助进程这样找不到。CI 只在 Linux 上运行。贡献者提交的 hook 在 Windows 11 + Antigravity CLI 1.4.4 上手动验证过;之后针对 Windows 的改动(`/usage` 路径及其启动和结束 `agy` 的方式、doctor 的 Windows 路径、加固后的 hook)有 Linux 和 macOS 上的测试覆盖,但还没有在 Windows 上实际运行过。
