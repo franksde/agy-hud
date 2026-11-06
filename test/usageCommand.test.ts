@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -145,18 +145,43 @@ test("runAgy sends no signal after a run has settled", async () => {
   assert.deepEqual(killed, [], "a clean run must not be followed by a group kill");
 });
 
-// A detached child gets a console of its own on Windows, which pops up a window each refresh unless
-// it is hidden. windowsHide does nothing elsewhere, so only the option itself can be checked here.
-test("runAgy hides the console window of its detached child", async t => {
+// On Windows, detached means DETACHED_PROCESS: agy gets no console at all, and CREATE_NO_WINDOW, which
+// windowsHide would add, is ignored alongside it. Every console program agy starts in turn (cmd.exe, an
+// MCP server) then opens a visible console window of its own (issue #19). Not detached, agy gets a
+// hidden console that those programs inherit. Elsewhere it stays detached so a kill reaches its whole
+// process group. Neither flag does anything off Windows, so only the options can be checked here.
+async function spawnOptionsOn(t: TestContext, platform: NodeJS.Platform): Promise<childProcess.SpawnOptions> {
   const seen: childProcess.SpawnOptions[] = [];
   const original = childProcess.spawn;
-  t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
+  const mock = t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
     seen.push(args[2] as childProcess.SpawnOptions);
     return (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
   });
   const { command } = fakeAgy("echo ok");
-  await runAgy([], process.env, { command });
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+  let run: Promise<unknown>;
+  try {
+    run = runAgy([], process.env, { command });
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+  await run;
+  mock.mock.restore();
   assert.equal(seen.length, 1);
-  assert.equal(seen[0].detached, true);
-  assert.equal(seen[0].windowsHide, true);
+  return seen[0];
+}
+
+test("runAgy does not detach agy on Windows, so the consoles agy opens stay hidden", async t => {
+  const options = await spawnOptionsOn(t, "win32");
+  assert.equal(options.detached, false);
+  assert.equal(options.windowsHide, true);
+});
+
+test("runAgy detaches agy into its own process group off Windows", async t => {
+  for (const platform of ["darwin", "linux"] as const) {
+    const options = await spawnOptionsOn(t, platform);
+    assert.equal(options.detached, true, platform);
+    assert.equal(options.windowsHide, true, platform);
+  }
 });

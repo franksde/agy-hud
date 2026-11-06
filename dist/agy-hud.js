@@ -682,7 +682,8 @@ function runAgy(args, env, options = {}) {
       }
       resolve(result);
     };
-    const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached: true, windowsHide: true });
+    const detached = process.platform !== "win32";
+    const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached, windowsHide: true });
     const killGroup = () => {
       try {
         if (child.pid !== void 0) process.kill(-child.pid, "SIGKILL");

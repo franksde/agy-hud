@@ -108,15 +108,18 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
       }
       resolve(result);
     };
-    // Its own process group, so a kill also reaches anything agy started, which would otherwise hold
-    // the output pipe open past the timeout. Detached on Windows also means a console of its own,
-    // which would flash a window on every refresh unless hidden.
-    const child = spawn(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached: true, windowsHide: true });
+    // Off Windows, its own process group, so a kill also reaches anything agy started, which would
+    // otherwise hold the output pipe open past the timeout. Windows has no process groups, and there
+    // detached means DETACHED_PROCESS: agy gets no console, the CREATE_NO_WINDOW that windowsHide adds
+    // is ignored, and each console program agy starts (cmd.exe, an MCP server) opens a visible window
+    // (issue #19). Not detached, agy gets a hidden console that those programs inherit.
+    const detached = process.platform !== "win32";
+    const child = spawn(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached, windowsHide: true });
     const killGroup = () => {
       try {
         if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
       } catch {
-        // Windows has no process groups, so this reaches agy alone. finish() lets go of the pipe,
+        // No process group on Windows, so this reaches agy alone. finish() lets go of the pipe,
         // so a helper it leaves behind still cannot hold the refresh open.
         child.kill("SIGKILL");
       }
