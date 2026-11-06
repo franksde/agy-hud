@@ -175,7 +175,12 @@ Linux. Rules that are easy to break from macOS:
   does not read (tightship#89); a path with a space takes its 8.3 short form.
 - **No loopback probe on Windows.** `refreshQuota` reports the loopback as refused there without
   running `ps` or `lsof`, which do not exist, so refreshes take the `/usage` route with its pacing.
-- **Detached children need `windowsHide: true`,** or each refresh opens a console window.
+- **Do not detach a console program on Windows; give it `windowsHide: true`.** Detached on Windows
+  means `DETACHED_PROCESS`: the child has no console, `windowsHide`'s `CREATE_NO_WINDOW` is ignored,
+  and every console program the child starts opens a visible window (#19). Attached with
+  `windowsHide` and no inherited stdio, the child gets a console with no window and its children
+  inherit it. `runAgy` therefore detaches agy only off Windows. The background `node` refresh stays
+  detached so it outlives the status line; it opens no window of its own.
 - **doctor paths go through the platform.** Compare with `fold` in `runsInstalledCopy`, shorten
   with `abbreviate`, join with `separator`. A template string with `/` produces mixed separators
   on Windows that neither the comparison nor the abbreviation matches.
