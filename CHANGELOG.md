@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.16 — 2026-11-06
+
+- On Windows, quota refreshes no longer open console windows (#19). The `agy -p /usage` run was started detached, which on Windows leaves it with no console at all. `windowsHide` cannot take effect then, so each console program `agy` started in turn, such as `cmd.exe` or an MCP server, opened a visible window of its own. On Windows `agy` now starts attached, with a console that has no window, and the programs it starts inherit that console. 0.1.14 said the refresh no longer opened a console window: that held for `agy` itself, not for what it started. A program that asks for a new console of its own can still show one.
+- On Windows, a `/usage` run that times out or exceeds its output cap now ends `agy` together with the processes it started (`taskkill /T`), so an MCP server no longer outlives the refresh. Scratch directories that a busy process kept from being removed are swept by a later run once they are an hour old.
+- `doctor` runs `agy plugin list` hidden and outside the current directory, so on Windows an `agy.exe` in the workspace is no longer run in place of the one on `PATH`.
+- Not run on Windows here. The fix follows the reporter's isolation of the spawn option and the process-creation flags documented for Node, libuv and Windows; the tests pin the spawn options and the taskkill call on Linux and macOS.
+
 ## 0.1.15 — 2026-11-05
 
 - The status line is no longer killed when a turn settles to idle (#18). That redraw now waits at most 2 seconds for the quota refresh it runs first; past that it renders the cached quota, cancels the loopback probe and leaves the refresh to the background. A loopback port that accepted the connection but never answered used to hold the redraw for 10 seconds per port (5 s over HTTPS, then 5 s over HTTP), which reached the CLI's status-line timeout on Antigravity CLI 1.5.0, and because the killed run never saved its state, the next idle redraw tried again. Each loopback request is now abandoned 1.5 seconds after it starts, measured as elapsed time rather than socket inactivity, which let a stalled TLS handshake run about twice as long. The `ps` and `lsof` calls that find the server, which run synchronously and so cannot be interrupted by that wait, are each stopped after 1 second.
