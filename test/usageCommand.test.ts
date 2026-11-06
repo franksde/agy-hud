@@ -145,11 +145,11 @@ test("runAgy sends no signal after a run has settled", async () => {
   assert.deepEqual(killed, [], "a clean run must not be followed by a group kill");
 });
 
-// On Windows, detached means DETACHED_PROCESS: agy gets no console at all, and CREATE_NO_WINDOW, which
-// windowsHide would add, is ignored alongside it. Every console program agy starts in turn (cmd.exe, an
-// MCP server) then opens a visible console window of its own (issue #19). Not detached, agy gets a
-// hidden console that those programs inherit. Elsewhere it stays detached so a kill reaches its whole
-// process group. Neither flag does anything off Windows, so only the options can be checked here.
+// On Windows, detached means DETACHED_PROCESS, and CREATE_NO_WINDOW, which windowsHide would add, is
+// ignored alongside it. agy then has no console, and an ordinary console program it starts (cmd.exe, an
+// MCP server) opens a visible one of its own (issue #19). Off Windows, detached puts agy in its own
+// process group, which the timeout kill relies on. A Windows console cannot be observed from here, so
+// the test pins the spawn options.
 async function spawnOptionsOn(t: TestContext, platform: NodeJS.Platform): Promise<childProcess.SpawnOptions> {
   const seen: childProcess.SpawnOptions[] = [];
   const original = childProcess.spawn;
@@ -157,17 +157,12 @@ async function spawnOptionsOn(t: TestContext, platform: NodeJS.Platform): Promis
     seen.push(args[2] as childProcess.SpawnOptions);
     return (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
   });
-  const { command } = fakeAgy("echo ok");
-  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
-  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
-  let run: Promise<unknown>;
   try {
-    run = runAgy([], process.env, { command });
+    const { command } = fakeAgy("echo ok");
+    await runAgy([], process.env, { command, platform });
   } finally {
-    Object.defineProperty(process, "platform", descriptor);
+    mock.mock.restore();
   }
-  await run;
-  mock.mock.restore();
   assert.equal(seen.length, 1);
   return seen[0];
 }

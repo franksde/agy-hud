@@ -658,7 +658,7 @@ function parseUsageOutput(stdout) {
   return Object.keys(quota).length > 0 ? quota : null;
 }
 function runAgy(args, env, options = {}) {
-  const { command = "agy", timeoutMs = 45 * 1e3, maxBytes = 1024 * 1024 } = options;
+  const { command = "agy", timeoutMs = 45 * 1e3, maxBytes = 1024 * 1024, platform = process.platform } = options;
   return new Promise((resolve) => {
     let scratch;
     try {
@@ -682,7 +682,7 @@ function runAgy(args, env, options = {}) {
       }
       resolve(result);
     };
-    const detached = process.platform !== "win32";
+    const detached = platform !== "win32";
     const child = (0, import_node_child_process2.spawn)(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached, windowsHide: true });
     const killGroup = () => {
       try {

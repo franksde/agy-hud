@@ -77,12 +77,13 @@ export interface RunAgyOptions {
   command?: string;
   timeoutMs?: number;
   maxBytes?: number;
+  platform?: string;
 }
 
 // Runs agy from a fresh private directory, so no workspace rules or customizations load, and removes
 // the directory afterwards. The output is capped and the run is killed at the timeout.
 export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOptions = {}): Promise<UsageRunResult> {
-  const { command = "agy", timeoutMs = 45 * 1000, maxBytes = 1024 * 1024 } = options;
+  const { command = "agy", timeoutMs = 45 * 1000, maxBytes = 1024 * 1024, platform = process.platform } = options;
   return new Promise(resolve => {
     let scratch: string;
     try {
@@ -109,18 +110,19 @@ export function runAgy(args: string[], env: NodeJS.ProcessEnv, options: RunAgyOp
       resolve(result);
     };
     // Off Windows, its own process group, so a kill also reaches anything agy started, which would
-    // otherwise hold the output pipe open past the timeout. Windows has no process groups, and there
-    // detached means DETACHED_PROCESS: agy gets no console, the CREATE_NO_WINDOW that windowsHide adds
-    // is ignored, and each console program agy starts (cmd.exe, an MCP server) opens a visible window
-    // (issue #19). Not detached, agy gets a hidden console that those programs inherit.
-    const detached = process.platform !== "win32";
+    // otherwise hold the output pipe open past the timeout. On Windows, detached means DETACHED_PROCESS:
+    // agy gets no console, the CREATE_NO_WINDOW that windowsHide adds is ignored alongside it, and an
+    // ordinary console program agy starts (cmd.exe, an MCP server) opens a visible window of its own
+    // (issue #19). Not detached, agy gets a console with no window, which such programs inherit. One
+    // that asks for a new console of its own still gets a window; nothing set here can prevent that.
+    const detached = platform !== "win32";
     const child = spawn(command, args, { cwd: scratch, env, stdio: ["ignore", "pipe", "ignore"], detached, windowsHide: true });
     const killGroup = () => {
       try {
         if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
       } catch {
-        // No process group on Windows, so this reaches agy alone. finish() lets go of the pipe,
-        // so a helper it leaves behind still cannot hold the refresh open.
+        // Windows has no POSIX process group to signal, so this reaches agy alone. finish() lets go
+        // of the pipe, so a helper it leaves behind still cannot hold the refresh open.
         child.kill("SIGKILL");
       }
     };

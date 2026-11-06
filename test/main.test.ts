@@ -1532,7 +1532,8 @@ test("the background refresh is spawned with its lock token", async () => {
   assert.equal(fs.statSync(`${fixture.writePath}.lock`).mode & 0o077, 0);
 });
 
-// The background refresh is detached, which on Windows gives it a console window of its own.
+// The background refresh is detached, so it outlives the status-line run. windowsHide is a guard against
+// a console window on Windows; agy's own console is handled in runAgy.
 test("the background refresh is spawned without a console window", async t => {
   const seen: childProcess.SpawnOptions[] = [];
   const original = childProcess.spawn;
