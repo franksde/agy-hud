@@ -236,7 +236,7 @@ test("runAgy ends agy's whole process tree with taskkill on Windows", async t =>
 });
 
 test("runAgy kills agy directly on Windows when taskkill fails", async t => {
-  withWindowsDir(t, undefined, "D:\\Win");
+  withWindowsDir(t, "", "D:\\Win");
   const killers = captureTaskkill(t, 128);
   const { command } = fakeAgy("sleep 5");
   const started = Date.now();
@@ -244,7 +244,7 @@ test("runAgy kills agy directly on Windows when taskkill fails", async t => {
   assert.equal(result.timedOut, true);
   assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
   assert.equal(killers.length, 1);
-  assert.equal(killers[0].file, "D:\\Win\\System32\\taskkill.exe", "windir stands in for a missing SystemRoot");
+  assert.equal(killers[0].file, "D:\\Win\\System32\\taskkill.exe", "windir stands in for an empty SystemRoot");
 });
 
 // The stand-in taskkill reports success without ending agy, so agy keeps writing past the cap and then

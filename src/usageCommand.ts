@@ -175,7 +175,7 @@ function record(value: unknown): Record<string, unknown> {
 // pid is still agy's:
 // - It runs synchronously. Until it returns, Node cannot handle agy's exit, so agy's process handle
 //   stays open, and Windows reuses no pid while a handle to its process is open. This blocks the
-//   refresh, which runs in the background, for at most the taskkill timeout.
+//   refresh, which runs in the background; a taskkill still running at its timeout is terminated.
 // - Once Node has seen agy exit, it runs no more: the handle is closed and the pid may belong to
 //   another process. agy's leftovers cannot be found by it then anyway; finish() letting go of the
 //   pipe is what keeps them from holding the refresh open.
@@ -183,7 +183,8 @@ function record(value: unknown): Record<string, unknown> {
 // If it cannot run or fails, agy alone is killed.
 function killWindowsTree(child: ChildProcess): void {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+  // An empty value counts as missing, or the path would turn relative and resolve in the workspace.
+  const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
   const taskkill = path.win32.join(systemRoot, "System32", "taskkill.exe");
   const result = spawnSync(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5000 });
   if (result.error !== undefined || result.status !== 0) child.kill("SIGKILL");
