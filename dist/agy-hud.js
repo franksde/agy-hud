@@ -730,20 +730,11 @@ function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 function killWindowsTree(child) {
-  const fallback = () => {
-    child.kill("SIGKILL");
-  };
   if (child.pid === void 0 || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    const taskkill = import_node_path2.default.win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
-    const killer = (0, import_node_child_process2.spawn)(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5e3 });
-    killer.on("error", fallback);
-    killer.on("exit", (code) => {
-      if (code !== 0) fallback();
-    });
-  } catch {
-    fallback();
-  }
+  const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+  const taskkill = import_node_path2.default.win32.join(systemRoot, "System32", "taskkill.exe");
+  const result = (0, import_node_child_process2.spawnSync)(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5e3 });
+  if (result.error !== void 0 || result.status !== 0) child.kill("SIGKILL");
 }
 function sweepStaleScratch(root, now = Date.now()) {
   let names;

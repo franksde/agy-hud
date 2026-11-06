@@ -16,8 +16,11 @@ export function captureSpawn(
   const calls: SpawnCall[] = [];
   const original = childProcess.spawn;
   t.mock.method(childProcess, "spawn", (...args: Parameters<typeof childProcess.spawn>) => {
-    const [file, argv, options] = args as unknown as [string, readonly string[], childProcess.SpawnOptions];
-    const call = { file, args: argv, options };
+    // spawn(file, options) leaves out the argument list.
+    const [file, second, third] = args as unknown[];
+    const call = Array.isArray(second)
+      ? { file: String(file), args: second as string[], options: (third ?? {}) as childProcess.SpawnOptions }
+      : { file: String(file), args: [], options: (second ?? {}) as childProcess.SpawnOptions };
     calls.push(call);
     return intercept?.(call) ?? (original as (...a: unknown[]) => childProcess.ChildProcess)(...args);
   });

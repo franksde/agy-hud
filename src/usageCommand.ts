@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ChildProcess, spawn } from "node:child_process";
+import { ChildProcess, spawn, spawnSync } from "node:child_process";
 import { CachedQuotaBucket } from "./quota";
 
 // Antigravity CLI 1.2.2+ refuses the loopback probe for want of a CSRF token it never gives the
@@ -171,27 +171,22 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 // Windows has no process group to signal. taskkill /T ends agy and everything it started, such as an
-// MCP server that would otherwise outlive the refresh. It finds them by parent pid, so it runs before
-// any direct kill, while agy is still alive. Once agy has exited it runs no more: Windows may already
-// have given the pid to another process, and agy's leftovers cannot be found by it anyway; finish()
-// letting go of the pipe is what keeps them from holding the refresh open. taskkill is named by full
-// path because Windows looks up a bare name in the current directory first. If it cannot run or
-// fails, agy alone is killed.
+// MCP server that would otherwise outlive the refresh. It targets a pid, which is only safe while that
+// pid is still agy's:
+// - It runs synchronously. Until it returns, Node cannot handle agy's exit, so agy's process handle
+//   stays open, and Windows reuses no pid while a handle to its process is open. This blocks the
+//   refresh, which runs in the background, for at most the taskkill timeout.
+// - Once Node has seen agy exit, it runs no more: the handle is closed and the pid may belong to
+//   another process. agy's leftovers cannot be found by it then anyway; finish() letting go of the
+//   pipe is what keeps them from holding the refresh open.
+// taskkill is named by full path because Windows looks up a bare name in the current directory first.
+// If it cannot run or fails, agy alone is killed.
 function killWindowsTree(child: ChildProcess): void {
-  const fallback = () => {
-    child.kill("SIGKILL");
-  };
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    const taskkill = path.win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
-    const killer = spawn(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5000 });
-    killer.on("error", fallback);
-    killer.on("exit", code => {
-      if (code !== 0) fallback();
-    });
-  } catch {
-    fallback();
-  }
+  const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+  const taskkill = path.win32.join(systemRoot, "System32", "taskkill.exe");
+  const result = spawnSync(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5000 });
+  if (result.error !== undefined || result.status !== 0) child.kill("SIGKILL");
 }
 
 // Removes agy-hud-usage-* directories under `root` last modified over an hour ago. Best effort: one
