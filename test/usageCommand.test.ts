@@ -186,14 +186,18 @@ interface TaskkillCall {
   options: childProcess.SpawnSyncOptions;
 }
 
-function captureTaskkill(t: TestContext, status: number | null): TaskkillCall[] {
+type TaskkillOutcome = number | null | Error | "throw";
+
+function captureTaskkill(t: TestContext, outcome: TaskkillOutcome): TaskkillCall[] {
   const calls: TaskkillCall[] = [];
   const original = childProcess.spawnSync;
   t.mock.method(childProcess, "spawnSync", (...args: Parameters<typeof childProcess.spawnSync>) => {
     const [file, argv, options] = args as unknown as [string, readonly string[], childProcess.SpawnSyncOptions];
     if (!/taskkill\.exe$/i.test(file)) return (original as (...a: unknown[]) => unknown)(...args);
     calls.push({ file, args: argv, options });
-    return { pid: 0, output: [], stdout: null, stderr: null, status, signal: null };
+    if (outcome === "throw") throw new TypeError("spawnSync rejected its arguments");
+    if (outcome instanceof Error) return { pid: 0, output: [], stdout: null, stderr: null, status: null, signal: null, error: outcome };
+    return { pid: 0, output: [], stdout: null, stderr: null, status: outcome, signal: null };
   });
   return calls;
 }
@@ -246,6 +250,20 @@ test("runAgy kills agy directly on Windows when taskkill fails", async t => {
   assert.equal(killers.length, 1);
   assert.equal(killers[0].file, "D:\\Win\\System32\\taskkill.exe", "windir stands in for an empty SystemRoot");
 });
+
+for (const [name, outcome] of [["cannot start", Object.assign(new Error("spawnSync taskkill.exe ENOENT"), { code: "ENOENT" })], ["throws", "throw"]] as const) {
+  test(`runAgy kills agy directly on Windows when taskkill ${name}`, async t => {
+    const killers = captureTaskkill(t, outcome);
+    const directKill = t.mock.method(childProcess.ChildProcess.prototype, "kill");
+    const { command } = fakeAgy("sleep 5");
+    const started = Date.now();
+    const result = await runAgy([], process.env, { command, timeoutMs: 200, platform: "win32" });
+    assert.equal(result.timedOut, true);
+    assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+    assert.equal(killers.length, 1);
+    assert.deepEqual(directKill.mock.calls.map(call => call.arguments[0]), ["SIGKILL"]);
+  });
+}
 
 // The stand-in taskkill reports success without ending agy, so agy keeps writing past the cap and then
 // reaches the timeout, and each of those would start a taskkill of its own.

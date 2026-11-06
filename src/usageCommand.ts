@@ -186,8 +186,14 @@ function killWindowsTree(child: ChildProcess): void {
   // An empty value counts as missing, or the path would turn relative and resolve in the workspace.
   const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
   const taskkill = path.win32.join(systemRoot, "System32", "taskkill.exe");
-  const result = spawnSync(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5000 });
-  if (result.error !== undefined || result.status !== 0) child.kill("SIGKILL");
+  let ended = false;
+  try {
+    const result = spawnSync(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5000 });
+    ended = result.error === undefined && result.status === 0;
+  } catch {
+    // Thrown rather than reported, for example when Node's permission model forbids child processes.
+  }
+  if (!ended) child.kill("SIGKILL");
 }
 
 // Removes agy-hud-usage-* directories under `root` last modified over an hour ago. Best effort: one

@@ -733,8 +733,13 @@ function killWindowsTree(child) {
   if (child.pid === void 0 || child.exitCode !== null || child.signalCode !== null) return;
   const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
   const taskkill = import_node_path2.default.win32.join(systemRoot, "System32", "taskkill.exe");
-  const result = (0, import_node_child_process2.spawnSync)(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5e3 });
-  if (result.error !== void 0 || result.status !== 0) child.kill("SIGKILL");
+  let ended = false;
+  try {
+    const result = (0, import_node_child_process2.spawnSync)(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true, timeout: 5e3 });
+    ended = result.error === void 0 && result.status === 0;
+  } catch {
+  }
+  if (!ended) child.kill("SIGKILL");
 }
 function sweepStaleScratch(root, now = Date.now()) {
   let names;
