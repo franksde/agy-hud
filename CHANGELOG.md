@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.17 — 2026-11-07
+
+- Quota refreshes no longer start agy's background updater, which on Windows briefly flashed a terminal window (#19). Once agy's last update check is 15 minutes old, the `agy -p /usage` run that a refresh starts spawns `agy --bg-updater`, which runs `agy --version`, and that grandchild showed a window that no option on the `/usage` run can hide. The run now gets `AGY_CLI_DISABLE_AUTO_UPDATE=true`, which agy checks before it considers updating. Only that run skips the check: your own `agy` sessions keep updating automatically, and `agy update` is unaffected. agy reads only `true`; on Antigravity CLI 1.5.3 a value of `1` still started the updater, so agy-hud sets `true` even when `1` is already in the environment.
+- Measured on Antigravity CLI 1.5.3: the `/usage` run logs `Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE` and starts no updater; install and the `/usage` quota fallback work. Not run on Windows here; the updater chain was captured on Windows by the reporter.
+
 ## 0.1.16 — 2026-11-06
 
 - On Windows, quota refreshes no longer open console windows (#19). The `agy -p /usage` run was started detached, which on Windows leaves it with no console at all. `windowsHide` cannot take effect then, so each console program `agy` started in turn, such as `cmd.exe` or an MCP server, opened a visible window of its own. On Windows `agy` now starts attached, with a console that has no window, and the programs it starts inherit that console. 0.1.14 said the refresh no longer opened a console window: that held for `agy` itself, not for what it started. A program that asks for a new console of its own can still show one.

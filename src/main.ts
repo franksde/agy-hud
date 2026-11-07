@@ -11,7 +11,7 @@ import { branch as gitBranch } from "./gitinfo";
 import { Payload, render } from "./statusline";
 import { DoctorDeps, collectDoctorReport, formatDoctorReport } from "./doctor";
 
-export const version = "0.1.16";
+export const version = "0.1.17";
 export const sameFrameRefreshBudgetMs = 2000;
 // Antigravity CLI can leave the status line's stdin open after the payload, or never write one
 // (antigravity-cli#698), and kills a status line that has not exited within its timeout. So the

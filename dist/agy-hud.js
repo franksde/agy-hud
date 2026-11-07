@@ -1786,7 +1786,7 @@ function nerdFontLines(report) {
 }
 
 // src/main.ts
-var version = "0.1.16";
+var version = "0.1.17";
 var sameFrameRefreshBudgetMs = 2e3;
 var stdinTimeoutMs = 1e3;
 var consumedQuotaRefreshMs = 15 * 1e3;
