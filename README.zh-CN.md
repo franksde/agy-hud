@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.4.5,安装和 `/usage` 回退另在 1.5.1 上验证;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.4.5,安装和 `/usage` 回退另在 1.5.3 上验证;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
 - macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`,且 CLI 必须是通过 `cmd.exe` 运行状态栏的版本,大概是 1.1.2 或更新(见[从 GitHub Release 安装](#从-github-release-安装))。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
@@ -412,7 +412,7 @@ Windows 上没有查找 loopback 服务所需的 `ps` 和 `lsof`,所以 `quota r
 | 一轮进行中,或刚结束 | 60 秒 |
 | CLI 空闲(例如打字引起的重绘) | 5 分钟 |
 
-所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,print 模式不显示状态栏,所以 `hooks/status-line.sh` 见到这个标记直接退出、不启动 Node;直接用 bundle 接入时,bundle 什么也不输出。
+所有会话同一时间最多只有一个在执行:缓存旁的锁文件记录持有者,只有持有者会执行 `/usage` 并删除它,超过 2 分钟的锁视为失效并被接管。失败后等待 60 秒再试,每次翻倍,最多 10 分钟。它启动的 `agy` 也会渲染状态栏;agy-hud 给这个子进程加上 `AGY_HUD_NESTED=1`,print 模式不显示状态栏,所以 `hooks/status-line.sh` 见到这个标记直接退出、不启动 Node;直接用 bundle 接入时,bundle 什么也不输出。这个子进程还带有 `AGY_CLI_DISABLE_AUTO_UPDATE=true`,跳过 agy 自己的更新检查:否则距上次检查超过 15 分钟时,它会启动 `agy --bg-updater`,在 Windows 上会闪一下终端窗口。你自己的 `agy` 会话和 `agy update` 照常更新。
 
 被拒的情况记在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里,包括状态栏 payload 中的 CLI `version` 和失败退避。只要 payload 报的还是这个版本,刷新就直接走 `/usage`。CLI 升级后,下一次刷新会重新尝试 loopback,loopback 成功就删除这个文件。payload 里没有版本号时从不算被拒,手动执行 `quota refresh` 也总是先试 loopback。其他 loopback 失败(比如没有正在运行的服务)从不改走 `/usage`,所以旧版 CLI 的行为完全不变。
 
