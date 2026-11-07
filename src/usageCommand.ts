@@ -26,7 +26,12 @@ export type UsageOutcome =
 export async function queryUsage(runner: UsageRunner = runAgy): Promise<UsageOutcome> {
   // agy runs the status-line command in print mode as well, so the child would otherwise render
   // agy-hud, which could start another refresh. The marker makes that nested render inert.
-  const result = await runner(usageArgs, { ...process.env, AGY_HUD_NESTED: "1" });
+  // AGY_CLI_DISABLE_AUTO_UPDATE keeps this agy from checking for updates. Once the last check is
+  // 15 minutes old, agy spawns `agy --bg-updater`, which runs `agy --version`, and on Windows that
+  // grandchild flashes a terminal window that nothing set here can hide (#19). The check is skipped
+  // only for this read-only run; the user's own sessions keep updating. agy reads only "true": on
+  // CLI 1.5.3 a value of "1" still spawned the updater.
+  const result = await runner(usageArgs, { ...process.env, AGY_HUD_NESTED: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
   // CLI error text can carry account URLs, so failures are described, never echoed.
   if (result.error !== undefined) {
     return { ok: false, message: "agy /usage failed: could not start agy." };

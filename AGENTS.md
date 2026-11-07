@@ -125,6 +125,11 @@ measurements behind it are in `docs/superpowers/specs/2026-09-25-usage-command-q
   1.3.5). `AGY_HUD_NESTED=1` is what stops that nested render from refreshing again or overwriting
   the session's refresh state. `hooks/status-line.sh` exits on it before starting Node, and the bundle
   prints nothing on it for a status line wired straight to `dist/agy-hud.js`. Never drop either.
+- The `/usage` child also gets `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Without it, once agy's last update
+  check is 15 minutes old the child spawns `agy --bg-updater`, which runs `agy --version`, and on
+  Windows that grandchild flashes a terminal window (#19). agy reads only `true`: on CLI 1.5.3, `1`
+  still spawned the updater. Do not replace this with touching `last_check.timestamp` in the user's
+  profile, as dsh-agy-link does; the variable reaches only this run.
 - Fall back to `/usage` only on an authentication refusal. Any other loopback failure must behave as
   before, so older CLIs are untouched.
 - Do not scrape the token from the CLI binary, its memory or another process's environment. CodexBar

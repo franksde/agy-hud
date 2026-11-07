@@ -613,7 +613,7 @@ var import_node_path2 = __toESM(require("node:path"));
 var import_node_child_process2 = require("node:child_process");
 var usageArgs = ["-p", "/usage", "--output-format", "json", "--print-timeout", "30s"];
 async function queryUsage(runner = runAgy) {
-  const result = await runner(usageArgs, { ...process.env, AGY_HUD_NESTED: "1" });
+  const result = await runner(usageArgs, { ...process.env, AGY_HUD_NESTED: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
   if (result.error !== void 0) {
     return { ok: false, message: "agy /usage failed: could not start agy." };
   }

@@ -74,6 +74,24 @@ test("queryUsage runs agy with the /usage arguments and marks the child as neste
   assert.equal(seen!.env.AGY_HUD_NESTED, "1");
 });
 
+test("queryUsage turns off agy's auto-update check in the child, overriding a value agy ignores", async () => {
+  const saved = process.env.AGY_CLI_DISABLE_AUTO_UPDATE;
+  // agy 1.5.3 honours only "true": with "1" it still spawned --bg-updater.
+  process.env.AGY_CLI_DISABLE_AUTO_UPDATE = "1";
+  try {
+    let seen: NodeJS.ProcessEnv | null = null;
+    await queryUsage(async (_args, env) => {
+      seen = env;
+      return { code: 0, stdout: usageJson(), timedOut: false };
+    });
+    assert.equal(seen!.AGY_CLI_DISABLE_AUTO_UPDATE, "true");
+    assert.equal(process.env.AGY_CLI_DISABLE_AUTO_UPDATE, "1");
+  } finally {
+    if (saved === undefined) delete process.env.AGY_CLI_DISABLE_AUTO_UPDATE;
+    else process.env.AGY_CLI_DISABLE_AUTO_UPDATE = saved;
+  }
+});
+
 function fakeAgy(body: string): { command: string; dir: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-fake-"));
   return { command: writeFakeExecutable(dir, "agy", body), dir };
