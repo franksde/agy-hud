@@ -1611,9 +1611,6 @@ function readStatusline(deps) {
     return { command: null, enabled: true, wired: false };
   }
   const statusLine = parsed?.statusLine;
-  if (statusLine === false) {
-    return { command: null, enabled: false, wired: false };
-  }
   if (statusLine === null || typeof statusLine !== "object" || Array.isArray(statusLine)) {
     return { command: null, enabled: true, wired: false };
   }
