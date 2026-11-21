@@ -327,6 +327,36 @@ test("Gemini models other than Argon ignore the Argon bucket", () => {
   assert.match(usage, /42%.*81%/);
 });
 
+// Orchestrator (X) plans with Gemini 4 X and hands execution to Gemini 4 Hydrogen, which draws on the
+// Gemini buckets. Measured on Ultra (CLI 1.5.14): an Orchestrator run moved only gemini-5h and
+// gemini-weekly. With an Argon planner the Gemini buckets still apply, not Argon's own weekly one.
+test("Orchestrator (Argon) reads the Gemini buckets, not Argon's own", () => {
+  const payload = { ...fixturePayload(), terminal_width: 180, model: { display_name: "Orchestrator (Argon)" }, quota: {
+    "gemini-5h": { remaining_fraction: 0.42 }, "gemini-weekly": { remaining_fraction: 0.81 },
+    "gemini-argon-wtu-weekly": { remaining_fraction: 0 }
+  } };
+  const usage = render(payload, { config: { ...defaultConfig(), color: false } }).split("\n")[1];
+  assert.match(usage, /42%.*81%/);
+});
+
+test("Orchestrator (Argon) reads the Gemini buckets from a usage cache that also holds Argon's", () => {
+  const payload = fixturePayload();
+  payload.terminal_width = 180;
+  payload.model = { display_name: "Orchestrator (Argon)" };
+  payload.quota = undefined;
+  const config = defaultConfig();
+  config.color = false;
+  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {},
+    quota: {
+      "gemini-5h": { remaining_fraction: 0.7, reset_time: fiveHourReset },
+      "gemini-weekly": { remaining_fraction: 0.8, reset_time: weeklyReset },
+      "gemini-argon-wtu-weekly": { remaining_fraction: 0.25, reset_time: weeklyReset }
+    } };
+  const line = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-06-15T03:52:00Z") })).split("\n")[1];
+  assert.match(line, /70%.*80%/);
+  assert.doesNotMatch(line, /75%|25%/);
+});
+
 test("context value formats", () => {
   const cases: Record<string, string> = {
     percent: "Context █░░░░░░░░░ 12%",

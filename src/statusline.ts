@@ -514,7 +514,9 @@ function officialQuotaKeys(modelDisplay: string, quota: Record<string, OfficialQ
   if (normalized.includes("claude") || normalized.includes("gpt") || normalized.includes("oss")) {
     return [{ key: "3p-5h", label: "5h" }, { key: "3p-weekly", label: "W" }];
   }
-  if (normalized.includes("argon") && Object.prototype.hasOwnProperty.call(quota, argonWeeklyKey)) {
+  // Orchestrator (X) names its planner, Gemini 4 X; execution always goes to Gemini 4 Hydrogen, which
+  // draws on the Gemini buckets. Argon's own weekly bucket would cover the planner's share at most.
+  if (normalized.includes("argon") && !normalized.includes("orchestrator") && Object.prototype.hasOwnProperty.call(quota, argonWeeklyKey)) {
     return [{ key: argonWeeklyKey, label: "W" }];
   }
   return [{ key: "gemini-5h", label: "5h" }, { key: "gemini-weekly", label: "W" }];

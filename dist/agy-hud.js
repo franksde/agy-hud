@@ -1245,7 +1245,7 @@ function officialQuotaKeys(modelDisplay, quota) {
   if (normalized.includes("claude") || normalized.includes("gpt") || normalized.includes("oss")) {
     return [{ key: "3p-5h", label: "5h" }, { key: "3p-weekly", label: "W" }];
   }
-  if (normalized.includes("argon") && Object.prototype.hasOwnProperty.call(quota, argonWeeklyKey)) {
+  if (normalized.includes("argon") && !normalized.includes("orchestrator") && Object.prototype.hasOwnProperty.call(quota, argonWeeklyKey)) {
     return [{ key: argonWeeklyKey, label: "W" }];
   }
   return [{ key: "gemini-5h", label: "5h" }, { key: "gemini-weekly", label: "W" }];
