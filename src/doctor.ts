@@ -47,6 +47,7 @@ export interface DoctorReport {
   nodeOk: boolean;
   platform: string;
   statuslineCommand: string | null;
+  statuslineEnabled: boolean;
   statuslineWired: boolean;
   configPath: string | null;
   suggestedConfigPath: string;
@@ -72,7 +73,7 @@ const nerdFontPattern = /nerd[\s_-]*font|nf-[a-z]/i;
 export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
   const config = resolveConfig(deps);
   const [nerdFont, nerdFontMatches] = scanNerdFont(deps);
-  const [statuslineCommand, statuslineWired] = readStatuslineCommand(deps);
+  const statusline = readStatusline(deps);
   // Config lookup stops at the first readable candidate, and a config.json next to the bundle or in
   // the plugin root outranks the home path. Suggesting the home path while such a file exists would
   // hand the user an edit the HUD never reads, so the fix always names the file already in effect.
@@ -84,8 +85,9 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     nodeVersion: deps.nodeVersion,
     nodeOk: nodeMajor(deps.nodeVersion) >= 18,
     platform: deps.platform,
-    statuslineCommand,
-    statuslineWired,
+    statuslineCommand: statusline.command,
+    statuslineEnabled: statusline.enabled,
+    statuslineWired: statusline.wired,
     configPath: config.path,
     suggestedConfigPath: suggested,
     userConfigPath: homeConfigPath(deps),
@@ -99,7 +101,7 @@ export function collectDoctorReport(deps: DoctorDeps): DoctorReport {
     installedPluginStatus,
     // A status line owned by another tool is not ours to rewire, so the comparison only applies when
     // the command runs agy-hud at all.
-    statuslineRunsInstalled: statuslineWired ? runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir, deps.platform) : null
+    statuslineRunsInstalled: statusline.wired ? runsInstalledCopy(statusline.command, installedPlugin, deps.homedir, deps.platform) : null
   };
 }
 
@@ -208,25 +210,37 @@ function homeConfigPath(deps: DoctorDeps): string {
   return deps.homedir === "" ? "/.config/agy-hud/config.json" : `${deps.homedir}/.config/agy-hud/config.json`;
 }
 
-function readStatuslineCommand(deps: DoctorDeps): [string | null, boolean] {
+function commandPointsAtAgyHud(command: string, platform: string): boolean {
+  // Windows paths are case-insensitive, so AGY-HUD there is the same directory.
+  return (platform === "win32" ? command.toLowerCase() : command).includes("agy-hud");
+}
+
+function readStatusline(deps: DoctorDeps): { command: string | null; enabled: boolean; wired: boolean } {
   const sep = separator(deps.platform);
   const raw = deps.readFile([deps.homedir, ".gemini", "antigravity-cli", "settings.json"].join(sep));
   if (raw === null) {
-    return [null, false];
+    return { command: null, enabled: true, wired: false };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripBom(raw));
   } catch {
-    return [null, false];
+    return { command: null, enabled: true, wired: false };
   }
-  const statusLine = (parsed as { statusLine?: { command?: unknown } } | null)?.statusLine;
-  const command = typeof statusLine?.command === "string" ? statusLine.command : null;
-  if (command === null || command === "") {
-    return [null, false];
+  const statusLine = (parsed as { statusLine?: unknown } | null)?.statusLine;
+  if (statusLine === false) {
+    return { command: null, enabled: false, wired: false };
   }
-  // Windows paths are case-insensitive, so AGY-HUD there is the same directory.
-  return [command, (deps.platform === "win32" ? command.toLowerCase() : command).includes("agy-hud")];
+  if (statusLine === null || typeof statusLine !== "object" || Array.isArray(statusLine)) {
+    return { command: null, enabled: true, wired: false };
+  }
+  const entry = statusLine as { command?: unknown; enabled?: unknown };
+  const enabled = entry.enabled !== false;
+  const command = typeof entry.command === "string" && entry.command !== "" ? entry.command : null;
+  if (command === null) {
+    return { command: null, enabled, wired: false };
+  }
+  return { command, enabled, wired: enabled && commandPointsAtAgyHud(command, deps.platform) };
 }
 
 function scanNerdFont(deps: DoctorDeps): ["found" | "not-found" | "unknown", string[]] {
@@ -355,9 +369,7 @@ export function formatDoctorReport(report: DoctorReport): string {
   lines.push("");
   row("plugin", report.version);
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
-  row("statusline", report.statuslineCommand
-    ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`
-    : `not configured — run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`);
+  rows("statusline", statuslineLines(report, short, sep));
   rows("installed", installedLines(report, short));
   rows("config", [
     report.configPath
@@ -413,6 +425,27 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push("  the local machine, or take option A here.");
   }
   return lines.join("\n") + "\n";
+}
+
+function statuslineLines(report: DoctorReport, short: (filePath: string) => string, sep: string): string[] {
+  if (report.statuslineCommand) {
+    const displayed = short(report.statuslineCommand);
+    const pointsAtAgyHud = commandPointsAtAgyHud(report.statuslineCommand, report.platform);
+    if (!report.statuslineEnabled) {
+      if (pointsAtAgyHud) {
+        return [
+          displayed,
+          "disabled in settings (statusLine.enabled is false) — run /statusline enable in the CLI"
+        ];
+      }
+      return [`${displayed}   not pointing at agy-hud (disabled)`];
+    }
+    return [`${displayed}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`];
+  }
+  if (!report.statuslineEnabled) {
+    return [`disabled in settings — run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`];
+  }
+  return [`not configured — run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`];
 }
 
 function installedLines(report: DoctorReport, short: (filePath: string) => string): string[] {

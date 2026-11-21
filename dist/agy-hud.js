@@ -880,6 +880,7 @@ function shortModelName(display) {
   let short = display.split("Gemini").join("");
   short = short.split("Claude").join("");
   short = short.split("Thinking").join("");
+  short = short.split("Orchestrator").join("Orch");
   short = short.split("(").join("");
   short = short.split(")").join("");
   short = short.split("Medium").join("Med");
@@ -1388,10 +1389,20 @@ function state(raw) {
       return "Idle";
     case "thinking":
       return "Thinking";
+    case "working":
+      return "Working";
+    case "tool_use":
+      return "Tool";
+    case "reviewing":
+      return "Reviewing";
+    case "initializing":
+      return "Initializing";
     case "authenticating":
       return "Auth";
+    case "error":
+      return "Error";
     default:
-      return title(raw);
+      return title(raw.replace(/_/g, " "));
   }
 }
 function stateColor(label) {
@@ -1399,8 +1410,14 @@ function stateColor(label) {
     case "Idle":
       return colorGreen;
     case "Thinking":
+    case "Working":
+    case "Tool":
+    case "Reviewing":
       return colorYellow;
+    case "Error":
+      return colorRed;
     case "Auth":
+    case "Initializing":
       return colorCyan;
     default:
       return colorCyan;
@@ -1464,7 +1481,7 @@ var nerdFontPattern = /nerd[\s_-]*font|nf-[a-z]/i;
 function collectDoctorReport(deps) {
   const config = resolveConfig(deps);
   const [nerdFont, nerdFontMatches] = scanNerdFont(deps);
-  const [statuslineCommand, statuslineWired] = readStatuslineCommand(deps);
+  const statusline = readStatusline(deps);
   const suggested = config.path ?? homeConfigPath(deps);
   const [installedPluginStatus, installedPlugin] = readInstalledPlugin(deps);
   return {
@@ -1473,8 +1490,9 @@ function collectDoctorReport(deps) {
     nodeVersion: deps.nodeVersion,
     nodeOk: nodeMajor(deps.nodeVersion) >= 18,
     platform: deps.platform,
-    statuslineCommand,
-    statuslineWired,
+    statuslineCommand: statusline.command,
+    statuslineEnabled: statusline.enabled,
+    statuslineWired: statusline.wired,
     configPath: config.path,
     suggestedConfigPath: suggested,
     userConfigPath: homeConfigPath(deps),
@@ -1488,7 +1506,7 @@ function collectDoctorReport(deps) {
     installedPluginStatus,
     // A status line owned by another tool is not ours to rewire, so the comparison only applies when
     // the command runs agy-hud at all.
-    statuslineRunsInstalled: statuslineWired ? runsInstalledCopy(statuslineCommand, installedPlugin, deps.homedir, deps.platform) : null
+    statuslineRunsInstalled: statusline.wired ? runsInstalledCopy(statusline.command, installedPlugin, deps.homedir, deps.platform) : null
   };
 }
 function readInstalledPlugin(deps) {
@@ -1577,24 +1595,35 @@ function homeConfigPath(deps) {
   }
   return deps.homedir === "" ? "/.config/agy-hud/config.json" : `${deps.homedir}/.config/agy-hud/config.json`;
 }
-function readStatuslineCommand(deps) {
+function commandPointsAtAgyHud(command, platform) {
+  return (platform === "win32" ? command.toLowerCase() : command).includes("agy-hud");
+}
+function readStatusline(deps) {
   const sep = separator(deps.platform);
   const raw = deps.readFile([deps.homedir, ".gemini", "antigravity-cli", "settings.json"].join(sep));
   if (raw === null) {
-    return [null, false];
+    return { command: null, enabled: true, wired: false };
   }
   let parsed;
   try {
     parsed = JSON.parse(stripBom(raw));
   } catch {
-    return [null, false];
+    return { command: null, enabled: true, wired: false };
   }
   const statusLine = parsed?.statusLine;
-  const command = typeof statusLine?.command === "string" ? statusLine.command : null;
-  if (command === null || command === "") {
-    return [null, false];
+  if (statusLine === false) {
+    return { command: null, enabled: false, wired: false };
   }
-  return [command, (deps.platform === "win32" ? command.toLowerCase() : command).includes("agy-hud")];
+  if (statusLine === null || typeof statusLine !== "object" || Array.isArray(statusLine)) {
+    return { command: null, enabled: true, wired: false };
+  }
+  const entry = statusLine;
+  const enabled = entry.enabled !== false;
+  const command = typeof entry.command === "string" && entry.command !== "" ? entry.command : null;
+  if (command === null) {
+    return { command: null, enabled, wired: false };
+  }
+  return { command, enabled, wired: enabled && commandPointsAtAgyHud(command, deps.platform) };
 }
 function scanNerdFont(deps) {
   if (deps.platform === "linux") {
@@ -1692,7 +1721,7 @@ function formatDoctorReport(report) {
   lines.push("");
   row("plugin", report.version);
   row("node", `${report.nodeVersion}${report.nodeOk ? "" : "   too old, 18+ required"}`);
-  row("statusline", report.statuslineCommand ? `${short(report.statuslineCommand)}${report.statuslineWired ? "" : "   not pointing at agy-hud"}` : `not configured \u2014 run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`);
+  rows("statusline", statuslineLines(report, short, sep));
   rows("installed", installedLines(report, short));
   rows("config", [
     report.configPath ? `${short(report.configPath)} (show_icons: ${report.showIcons})` : `none found, using defaults (show_icons: ${report.showIcons})`,
@@ -1740,6 +1769,26 @@ function formatDoctorReport(report) {
     lines.push("  the local machine, or take option A here.");
   }
   return lines.join("\n") + "\n";
+}
+function statuslineLines(report, short, sep) {
+  if (report.statuslineCommand) {
+    const displayed = short(report.statuslineCommand);
+    const pointsAtAgyHud = commandPointsAtAgyHud(report.statuslineCommand, report.platform);
+    if (!report.statuslineEnabled) {
+      if (pointsAtAgyHud) {
+        return [
+          displayed,
+          "disabled in settings (statusLine.enabled is false) \u2014 run /statusline enable in the CLI"
+        ];
+      }
+      return [`${displayed}   not pointing at agy-hud (disabled)`];
+    }
+    return [`${displayed}${report.statuslineWired ? "" : "   not pointing at agy-hud"}`];
+  }
+  if (!report.statuslineEnabled) {
+    return [`disabled in settings \u2014 run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`];
+  }
+  return [`not configured \u2014 run /statusline <plugin-root>${sep}hooks${sep}${hookName(report.platform)} in the CLI`];
 }
 function installedLines(report, short) {
   if (report.installedPluginStatus === "unknown" || report.installedPlugin === null) {

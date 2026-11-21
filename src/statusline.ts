@@ -85,6 +85,7 @@ export function shortModelName(display: string): string {
   let short = display.split("Gemini").join("");
   short = short.split("Claude").join("");
   short = short.split("Thinking").join("");
+  short = short.split("Orchestrator").join("Orch");
   short = short.split("(").join("");
   short = short.split(")").join("");
   short = short.split("Medium").join("Med");
@@ -674,10 +675,20 @@ function state(raw: string): string {
       return "Idle";
     case "thinking":
       return "Thinking";
+    case "working":
+      return "Working";
+    case "tool_use":
+      return "Tool";
+    case "reviewing":
+      return "Reviewing";
+    case "initializing":
+      return "Initializing";
     case "authenticating":
       return "Auth";
+    case "error":
+      return "Error";
     default:
-      return title(raw);
+      return title(raw.replace(/_/g, " "));
   }
 }
 
@@ -686,8 +697,14 @@ function stateColor(label: string): string {
     case "Idle":
       return colorGreen;
     case "Thinking":
+    case "Working":
+    case "Tool":
+    case "Reviewing":
       return colorYellow;
+    case "Error":
+      return colorRed;
     case "Auth":
+    case "Initializing":
       return colorCyan;
     default:
       return colorCyan;

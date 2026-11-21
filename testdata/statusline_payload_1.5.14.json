@@ -1,0 +1,59 @@
+{
+  "cwd": "agy-hud",
+  "session_id": "",
+  "conversation_id": "",
+  "transcript_path": "redacted-transcript.jsonl",
+  "model": {
+    "id": "Gemini 4 Neon (High)",
+    "display_name": "Gemini 4 Neon (High)",
+    "effort": "high"
+  },
+  "workspace": {
+    "current_dir": "agy-hud",
+    "project_dir": "agy-hud"
+  },
+  "version": "1.5.14",
+  "context_window": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "context_window_size": 1048576,
+    "used_percentage": 0,
+    "remaining_percentage": 100,
+    "current_usage": null
+  },
+  "exceeds_200k_tokens": null,
+  "product": "antigravity",
+  "quota": {
+    "3p-5h": {
+      "remaining_fraction": 1,
+      "reset_time": "2026-11-21T20:02:14Z",
+      "reset_in_seconds": 17998
+    },
+    "3p-weekly": {
+      "remaining_fraction": 1,
+      "reset_time": "2026-11-28T15:02:14Z",
+      "reset_in_seconds": 604798
+    },
+    "gemini-5h": {
+      "remaining_fraction": 0.96751267,
+      "reset_time": "2026-11-21T18:48:23Z",
+      "reset_in_seconds": 13567
+    },
+    "gemini-weekly": {
+      "remaining_fraction": 0.98887575,
+      "reset_time": "2026-11-28T08:48:23Z",
+      "reset_in_seconds": 582367
+    }
+  },
+  "agent_state": "idle",
+  "vcs": {
+    "type": "git"
+  },
+  "cycle_mode": "auto",
+  "sandbox": {
+    "enabled": false
+  },
+  "plan_tier": "Google AI Ultra",
+  "email": "",
+  "terminal_width": 140
+}

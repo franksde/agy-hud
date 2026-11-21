@@ -30,11 +30,22 @@ test("short model name strips Gemini and compacts tier", () => {
     "Gemini 3.1 Pro (High)": "3.1 Pro High",
     "Gemini 3.5 Flash (Medium)": "3.5 Flash Med",
     "Claude Sonnet 4.6 (Thinking)": "Sonnet 4.6",
-    "Claude Opus 4.6 (Thinking)": "Opus 4.6"
+    "Claude Opus 4.6 (Thinking)": "Opus 4.6",
+    "Gemini 4 Neon (High)": "4 Neon High",
+    "Gemini 4 Neon (XHigh)": "4 Neon XHigh",
+    "Gemini 4 Hydrogen (XHigh)": "4 Hydrogen XHigh",
+    "Orchestrator (Carbon)": "Orch Carbon",
+    "Orchestrator (Argon)": "Orch Argon",
+    "Orchestrator (Neon)": "Orch Neon",
+    "Orchestrator": "Orch"
   };
   for (const [input, want] of Object.entries(cases)) {
     assert.equal(shortModelName(input), want);
   }
+  // Keeps the 18-column cap intact.
+  const long = shortModelName("Orchestrator (Very Long Planner Name)");
+  assert.equal(visibleLen(long), 18);
+  assert.ok(long.endsWith("..."));
 });
 
 test("combined model plan badge and no duplicate model", () => {
@@ -909,4 +920,40 @@ test("keeps the agent mode in the single-line layout and on a narrow terminal", 
   assert.match(strip(renderMode("auto", { multiline: false })), /^3\.5 Flash Med \| Pro \| Auto /);
   const narrow = strip(renderMode("auto", {}, { terminal_width: 30 })).split("\n")[0];
   assert.match(narrow, /Auto/);
+});
+
+test("renders current CLI agent states cleanly with expected colors", () => {
+  const cases: Array<[string, string, string]> = [
+    ["idle", "Idle", "\x1b[32m"],
+    ["thinking", "Thinking", "\x1b[33m"],
+    ["working", "Working", "\x1b[33m"],
+    ["tool_use", "Tool", "\x1b[33m"],
+    ["reviewing", "Reviewing", "\x1b[33m"],
+    ["initializing", "Initializing", "\x1b[36m"],
+    ["authenticating", "Auth", "\x1b[36m"],
+    ["error", "Error", "\x1b[31m"],
+    ["custom_state", "Custom State", "\x1b[36m"]
+  ];
+  for (const [raw, label, color] of cases) {
+    const payload: Payload = { ...fixturePayload(), agent_state: raw, terminal_width: 140 };
+    const out = render(payload, { config: { ...defaultConfig(), showIcons: false }, gitBranch: "main" });
+    const line1 = out.split("\n")[0];
+    assert.ok(line1.includes(`${color}${label}\x1b[0m`), `state ${raw} expected ${label} with color, got ${JSON.stringify(line1)}`);
+    assert.doesNotMatch(strip(line1), /_/);
+  }
+});
+
+// A real Antigravity CLI 1.5.14 payload (sanitized) with Gemini 4 Neon (High) on Google AI Ultra
+// and Auto mode active (the default startup mode since CLI 1.5.7).
+test("renders a real Antigravity CLI 1.5.14 payload", () => {
+  const payload = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "testdata", "statusline_payload_1.5.14.json"), "utf8"));
+  const out = strip(render(payload, { config: defaultConfig(), quota: null, gitBranch: "main", now: new Date("2026-11-21T15:02:16Z") }));
+  const [line1, line2] = out.split("\n");
+  assert.match(line1, /4 Neon High \| Ultra \| Auto/);
+  assert.match(line1, /Idle/);
+  assert.match(line2, /^Context .* 0%/);
+  assert.match(line2, /Usage .* 97% \(↻ 3h 46m\) \|.* 99% \(↻ 6d 17h\)/);
+  for (const line of out.split("\n")) {
+    assert.ok(visibleLen(line) <= 140);
+  }
 });

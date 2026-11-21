@@ -41,6 +41,56 @@ test("treats a statusline wired to another command as not wired", () => {
     readFile: () => JSON.stringify({ statusLine: { command: "/usr/local/bin/starship" } })
   }));
   assert.equal(report.statuslineWired, false);
+  assert.equal(report.statuslineEnabled, true);
+});
+
+test("treats statusLine.enabled === false as not wired and instructs how to re-enable", () => {
+  const settings = "/home/u/.gemini/antigravity-cli/settings.json";
+  const command = "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh";
+  const report = collectDoctorReport(deps({
+    pluginList: () => pluginListJson,
+    readFile: p => (p === settings ? JSON.stringify({ statusLine: { command, enabled: false } }) : null)
+  }));
+  assert.equal(report.statuslineCommand, command);
+  assert.equal(report.statuslineEnabled, false);
+  assert.equal(report.statuslineWired, false);
+  assert.equal(report.statuslineRunsInstalled, null);
+  const text = formatDoctorReport(report);
+  assert.match(text, /disabled/i);
+  assert.match(text, /\/statusline enable/);
+  assert.doesNotMatch(text, /not pointing at agy-hud/);
+});
+
+test("keeps statuslineWired true when statusLine.enabled is explicitly true", () => {
+  const settings = "/home/u/.gemini/antigravity-cli/settings.json";
+  const command = "/home/u/.gemini/config/plugins/agy-hud/hooks/status-line.sh";
+  const report = collectDoctorReport(deps({
+    readFile: p => (p === settings ? JSON.stringify({ statusLine: { command, enabled: true } }) : null)
+  }));
+  assert.equal(report.statuslineEnabled, true);
+  assert.equal(report.statuslineWired, true);
+});
+
+test("treats a disabled non-agy-hud statusline as not wired and disabled", () => {
+  const settings = "/home/u/.gemini/antigravity-cli/settings.json";
+  const report = collectDoctorReport(deps({
+    readFile: p => (p === settings ? JSON.stringify({ statusLine: { command: "/usr/local/bin/starship", enabled: false } }) : null)
+  }));
+  assert.equal(report.statuslineEnabled, false);
+  assert.equal(report.statuslineWired, false);
+  const text = formatDoctorReport(report);
+  assert.match(text, /not pointing at agy-hud/);
+  assert.match(text, /disabled/i);
+});
+
+test("treats boolean statusLine: false as disabled with no command", () => {
+  const settings = "/home/u/.gemini/antigravity-cli/settings.json";
+  const report = collectDoctorReport(deps({
+    readFile: p => (p === settings ? JSON.stringify({ statusLine: false }) : null)
+  }));
+  assert.equal(report.statuslineCommand, null);
+  assert.equal(report.statuslineEnabled, false);
+  assert.equal(report.statuslineWired, false);
 });
 
 test("reports a missing or unparsable settings file without throwing", () => {
