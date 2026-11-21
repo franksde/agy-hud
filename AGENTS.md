@@ -111,7 +111,7 @@ quota moving in the HUD during a long task. Lengthening its TTL trades away exac
 pauses screen refreshes while nothing on screen changes, and an idle session measured no status-line
 call at all over 90 s.
 
-From Antigravity CLI 1.2.2 on (verified on 1.2.11, 1.2.14, 1.2.16, 1.3.5 and 1.4.5), the `agy` loopback server answers `GetUserStatus`
+From Antigravity CLI 1.2.2 on (verified on 1.2.11, 1.2.14, 1.2.16, 1.3.5, 1.4.5 and 1.5.14), the `agy` loopback server answers `GetUserStatus`
 with `401 missing CSRF token`, and nothing the CLI hands a plugin carries that token: not the
 status-line environment, not hook environments or hook stdin (both measured 2026-09-25). The refusal
 is recorded per CLI version in `<cache>.auth-rejected.json`, and refreshes for that version run the
@@ -121,10 +121,12 @@ measurements behind it are in `docs/superpowers/specs/2026-09-25-usage-command-q
 - `/usage` spends no quota but starts a whole `agy` for about 7 s. Keep it out of every redraw path,
   keep the single global lock, and keep its floors (60 s active, 5 minutes idle) and backoff. They
   are the answer to "not too often, but never frozen through a long task".
-- The `agy` it starts renders the status line as well, several times per run (nine measured on
-  1.3.5). `AGY_HUD_NESTED=1` is what stops that nested render from refreshing again or overwriting
-  the session's refresh state. `hooks/status-line.sh` exits on it before starting Node, and the bundle
-  prints nothing on it for a status line wired straight to `dist/agy-hud.js`. Never drop either.
+- On CLI 1.2.2–1.4.6, the `agy` it starts renders the status line as well, several times per run
+  (nine measured on 1.3.5); CLI 1.4.7+ stopped starting custom status-line commands in `-p` print
+  mode. Keep `AGY_HUD_NESTED=1` for older CLIs and as a safeguard: it stops any nested render from
+  refreshing again or overwriting the session's refresh state. `hooks/status-line.sh` exits on it
+  before starting Node, and the bundle prints nothing on it for a status line wired straight to
+  `dist/agy-hud.js`. Never drop either.
 - The `/usage` child also gets `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Without it, once agy's last update
   check is 15 minutes old the child spawns `agy --bg-updater`, which runs `agy --version`, and on
   Windows that grandchild flashes a terminal window (#19). agy reads only `true`: on CLI 1.5.3, `1`
