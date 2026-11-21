@@ -255,6 +255,8 @@ agy plugin uninstall agy-hud
 
    如果文件已存在,请把这个键合并进去——读出来、设置 `show_icons`、再写回。不要覆盖用户已经调过的配置。另外,如果 `doctor` 报出的 `configPath` 不是这一个,请改写到它报出的那个路径:bundle 旁边的配置优先级更高,写在这里的文件会被压住。
 
+   如果你是在 Antigravity CLI 的终端沙箱里运行:从 CLI 1.5.10 起,沙箱默认禁止命令读取 `~/.config`(或 `XDG_CONFIG_HOME`,Windows 上是 `AppData\Roaming`),读取已有文件可能失败,或需要用户批准。请向用户申请批准;不要把读取失败当成文件不存在,否则会覆盖他已有的配置。
+
    **除非用户主动要求,否则不要替他装字体。** 那是系统级改动,而且它本身什么都修不好:终端仍然按自己 profile 里写的字族来画,而那个设置无法可靠地脚本化。在 SSH 场景下更是有害无益——字形由他本地机器上的终端绘制,在远端主机装字体不可能改变任何东西。如果他确实想要图标,把[图标显示成方块](#图标显示成方块)里的两步告诉他,第二步交给他自己做。
 
 4. 询问用户是否需要调整 `multiline`、`context_value` 或 `usage_value`(见[配置](#配置))。然后下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压,执行 `agy plugin install <解压目录>`。传入的必须是解压出来的归档目录,绝不能是 git clone 的仓库目录(原因见[从本地路径安装](#从本地路径安装))。如果失败,把错误展示给用户,不要静默重试。

@@ -256,6 +256,8 @@ For a genuinely new install:
 
    If the file already exists, merge the key in — read it, set `show_icons`, write it back. Do not overwrite a config the user has already tuned. And if `doctor` reports a `configPath` other than this one, write to that path instead: a config next to the bundle outranks the home one, and a file written here would be shadowed.
 
+   If you run inside the Antigravity CLI's terminal sandbox: since CLI 1.5.10 it blocks sandboxed commands from reading `~/.config` (or `XDG_CONFIG_HOME`, and `AppData\Roaming` on Windows) by default, so reading the existing file can fail or need the user's approval. Ask for that approval; do not take a failed read for a missing file, or you will overwrite their config.
+
    **Do not install a font on their behalf unless they ask for it.** It is a system-level change, and on its own it fixes nothing: the terminal keeps drawing with the family named in its own profile, and that setting is not reliably scriptable. Over SSH it is worse than useless, because the glyphs are drawn by the terminal on their local machine and a font installed on the remote host cannot change them. If they do want icons, give them the two steps from [Icons Render As Boxes](#icons-render-as-boxes) and let them do the second one.
 
 4. Ask whether they want to adjust `multiline`, `context_value`, or `usage_value` (see [Config](#config)). Then download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, extract it, and run `agy plugin install <extracted-dir>`. Pass the extracted archive directory, never a git clone (see [Install From Local Path](#install-from-local-path) for why). If it fails, show the user the error instead of retrying silently.
