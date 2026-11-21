@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.18 — 2026-11-21
+
+- `doctor` reads `statusLine.enabled`. `/statusline off` keeps the command in `settings.json` and sets `"enabled": false`, and the CLI then shows its built-in status line instead; `doctor` used to report that as wired. It now reports `statuslineWired: false` with a new `statuslineEnabled: false`, and tells you to run `/statusline enable` when the disabled command is agy-hud's.
+- Orchestrator models show as `Orch Carbon`, `Orch Argon` and so on. `Orchestrator (Carbon)` came to 19 columns and was cut to `Orchestrator Ca...` by the 18-column model limit, which stays as it was.
+- Agent states follow the CLI's documented values: `tool_use` shows as `Tool` rather than `Tool_use`, `working` and `reviewing` show in yellow like `Thinking`, `initializing` in cyan like `Auth`, and `error` shows as `Error` in red. An unknown state has its underscores turned into spaces.
+- README: since Antigravity CLI 1.5.7 sessions start in Auto mode wherever it is available, so `show_mode` shows `Auto` from the start; `statusLine.stack_with_default` stacks the HUD under the built-in status line; CLI 1.4.7+ no longer runs the status-line command inside `agy -p`, so the `AGY_HUD_NESTED` guard now only matters on older CLIs. For AI agents: the CLI 1.5.10+ terminal sandbox blocks reads of `~/.config` by default, so a failed read of an existing `config.json` must not be taken for a missing file.
+- Measured on Antigravity CLI 1.5.14: rendering of a real payload (added, sanitized, to the test data), install, `agy plugin validate --strict`, and the `/usage` quota fallback. Which quota group Orchestrator models count against was not verified; they read the Gemini buckets, or Argon's weekly one for `Orchestrator (Argon)` when the payload has it.
+
 ## 0.1.17 — 2026-11-07
 
 - Quota refreshes no longer start agy's background updater, which on Windows briefly flashed a terminal window (#19). Once agy's last update check is 15 minutes old, the `agy -p /usage` run that a refresh starts spawns `agy --bg-updater`, which runs `agy --version`, and that grandchild showed a window that no option on the `/usage` run can hide. The run now gets `AGY_CLI_DISABLE_AUTO_UPDATE=true`, which agy checks before it considers updating. Only that run skips the check: your own `agy` sessions keep updating automatically, and `agy update` is unaffected. agy reads only `true`; on Antigravity CLI 1.5.3 a value of `1` still started the updater, so agy-hud sets `true` even when `1` is already in the environment.

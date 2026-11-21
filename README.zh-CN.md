@@ -265,7 +265,7 @@ agy plugin uninstall agy-hud
 
    ```json
    {
-     "version": "0.1.17",
+     "version": "0.1.18",
      "homedir": "/home/u",
      "nodeVersion": "v22.14.0",
      "nodeOk": true,
@@ -282,7 +282,7 @@ agy plugin uninstall agy-hud
      "remoteSession": false,
      "nerdFont": "not-found",
      "nerdFontMatches": [],
-     "installedPlugin": { "version": "0.1.17", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
+     "installedPlugin": { "version": "0.1.18", "path": "/home/u/.gemini/config/plugins/agy-hud", "enabled": true },
      "installedPluginStatus": "found",
      "statuslineRunsInstalled": true
    }
