@@ -1035,6 +1035,16 @@ test("an untouched epoch-0 cached bucket replaces an ended payload window only w
   assert.match(staleBeforeReset, /Usage \S+ 20% left/);
   assert.doesNotMatch(staleBeforeReset, /100%/);
 
+  // A future cache timestamp (> now) is untrustworthy and must not replace an ended payload either.
+  const futureCacheTimestamp = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.2, reset_time: "2026-06-15T03:00:00Z" } },
+    { "gemini-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } },
+    "2026-06-15T03:30:00Z",
+    "2026-06-15T04:00:00Z"
+  );
+  assert.match(futureCacheTimestamp, /Usage \S+ 20% left/);
+  assert.doesNotMatch(futureCacheTimestamp, /100%/);
+
   // Live consumed payload window must not be overwritten by an older untouched epoch-0 cache.
   const livePayload = bucketRender(
     { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset, reset_in_seconds: 16151 } },
@@ -1121,10 +1131,13 @@ test("epoch-0 and Go zero reset_time on a consumed payload never render fake clo
 test("liveCachedBuckets rejects consumed sentinel buckets, arbitrary negative timestamps, and out-of-range fractions", () => {
   const now = "2026-11-23T20:43:00Z";
   const cacheTime = "2026-11-23T20:42:00Z";
+  const futureReset = "2026-11-24T01:40:00Z";
   for (const badBucket of [
     { remaining_fraction: 0.4, reset_time: "1970-01-01T00:00:00Z" },
     { remaining_fraction: 1, reset_time: "1969-12-31T23:59:59Z" },
-    { remaining_fraction: 1.01, reset_time: "1970-01-01T00:00:00Z" }
+    { remaining_fraction: 1.01, reset_time: "1970-01-01T00:00:00Z" },
+    { remaining_fraction: -0.01, reset_time: futureReset },
+    { remaining_fraction: 1.01, reset_time: futureReset }
   ]) {
     const dropped = bucketRender(undefined, { "gemini-5h": badBucket }, now, cacheTime);
     assert.doesNotMatch(dropped, /Usage/);
@@ -1133,4 +1146,32 @@ test("liveCachedBuckets rejects consumed sentinel buckets, arbitrary negative ti
   // Go zero time on an untouched bucket (remaining_fraction === 1) is accepted alongside Unix epoch 0.
   const goZero = bucketRender(undefined, { "gemini-5h": { remaining_fraction: 1, reset_time: "0001-01-01T00:00:00Z" } }, now, cacheTime);
   assert.match(goZero, /Usage \S+ 100% left$/);
+});
+
+test("malformed non-string cache timestamp never crashes rendering, and negative payload reset_time does not bypass live countdown", () => {
+  const payload = fixturePayload();
+  payload.terminal_width = 160;
+  payload.quota = { "gemini-5h": { remaining_fraction: 0.2, reset_time: fiveHourReset, reset_in_seconds: 16151 } };
+  const malformedCache = {
+    timestamp: { toString: null },
+    source: "usage",
+    models: {},
+    quota: { "gemini-5h": { remaining_fraction: 0.5, reset_time: fiveHourReset } }
+  } as unknown as Cache;
+  const line = strip(render(payload, {
+    config: { ...defaultConfig(), color: false },
+    quota: malformedCache,
+    gitBranch: "main",
+    now: new Date("2026-06-15T03:52:00Z")
+  })).split("\n")[1];
+  assert.match(line, /Usage \S+ 20% left ↻ Reset 4h 29m/);
+
+  // Non-sentinel negative reset_time on payload with positive reset_in_seconds stays live instead of triggering payloadEnded.
+  const negResetWithSeconds = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.15, reset_time: "1969-12-31T23:59:59Z", reset_in_seconds: 1800 } },
+    { "gemini-5h": { remaining_fraction: 0.98, reset_time: "2026-11-24T01:40:00Z" } },
+    "2026-11-23T20:43:00Z",
+    "2026-11-23T20:42:00Z"
+  );
+  assert.match(negResetWithSeconds, /Usage \S+ 15% left ↻ Reset 30m/);
 });

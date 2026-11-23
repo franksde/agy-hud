@@ -337,8 +337,7 @@ function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, offici
     // Which buckets apply is the plan's call, and a payload carrying Gemini quota states it for this
     // session; a cache read under another plan must not decide it. A payload without Gemini quota says
     // nothing about Argon, so then the cache is all there is.
-    const cacheTimeMs = Date.parse(cache?.timestamp ?? "");
-    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now, cacheTimeMs);
+    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now, cache?.timestamp);
     const plan = officialQuota && geminiPlanKeys.some(key => Object.prototype.hasOwnProperty.call(officialQuota, key)) ? officialQuota : merged;
     const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
     if (mergedInfo !== null) {
@@ -384,7 +383,7 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
   const live: Record<string, OfficialQuotaBucket> = {};
   for (const [key, bucket] of Object.entries(cache.quota)) {
     const remaining = bucket?.remaining_fraction;
-    const reset = Date.parse(bucket?.reset_time ?? "");
+    const reset = typeof bucket?.reset_time === "string" ? Date.parse(bucket.reset_time) : Number.NaN;
     if (typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0 || remaining > 1 || !Number.isFinite(reset)) {
       continue;
     }
@@ -409,18 +408,19 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
 
 // The payload carries no fetch time, so freshness is read off the quota itself. A payload reading
 // whose window has already reset yields to a live cached reading (for an untouched sentinel cache
-// with no reset_time of its own, only when the cache was sampled at or after the ended window's
-// reset_time). A consumed payload with only a sentinel reset_time and no live countdown yields to
-// a cached bucket that has a valid future reset_time. When both readings are live and consumed (< 1)
-// and the payload's reset_time is more than 60 s later than the cache's (e.g. after a mid-window
-// server reset), the payload wins; a cache with a later reset_time and higher remaining fraction
-// never raises a live payload, because the shared /usage cache carries no account identity across
-// account switches. Otherwise two live readings are the same window, and the lower remainder wins.
+// with no reset_time of its own, only when the cache's query-start timestamp falls between the ended
+// window's reset_time and now). A consumed payload with only a sentinel reset_time and no live
+// countdown yields to a cached bucket that has a valid future reset_time. When both readings are
+// live and consumed (< 1) and the payload's reset_time is more than 60 s later than the cache's
+// (e.g. after a mid-window server reset), the payload wins; a cache with a later reset_time and
+// higher remaining fraction never raises a live payload, because the shared /usage cache carries no
+// account identity across account switches. Otherwise two live readings are the same window, and the
+// lower remainder wins.
 function mergeQuotaBuckets(
   official: Record<string, OfficialQuotaBucket>,
   cached: Record<string, OfficialQuotaBucket>,
   now: Date,
-  cacheTimeMs: number
+  cacheTimestamp?: unknown
 ): Record<string, OfficialQuotaBucket> {
   const merged: Record<string, OfficialQuotaBucket> = { ...official };
   for (const [key, fromCache] of Object.entries(cached)) {
@@ -431,13 +431,12 @@ function mergeQuotaBuckets(
     }
     const payloadRemaining = fromPayload.remaining_fraction ?? 1;
     const cacheRemaining = fromCache.remaining_fraction ?? 1;
-    const payloadReset = Date.parse(fromPayload.reset_time ?? "");
-    const cacheReset = Date.parse(fromCache.reset_time ?? "");
+    const payloadReset = typeof fromPayload.reset_time === "string" ? Date.parse(fromPayload.reset_time) : Number.NaN;
+    const cacheReset = typeof fromCache.reset_time === "string" ? Date.parse(fromCache.reset_time) : Number.NaN;
     const payloadUnset = isUnsetResetTime(payloadReset);
-    const cacheUnset = isUnsetResetTime(cacheReset);
     const payloadHasLiveSeconds = Number.isFinite(fromPayload.reset_in_seconds) && (fromPayload.reset_in_seconds ?? 0) > 0;
-    const payloadHasReset = Number.isFinite(payloadReset) && !payloadUnset;
-    const cacheHasReset = Number.isFinite(cacheReset) && !cacheUnset;
+    const payloadHasReset = Number.isFinite(payloadReset) && payloadReset > 0;
+    const cacheHasReset = Number.isFinite(cacheReset) && cacheReset > 0;
 
     if (payloadRemaining < 1 && payloadUnset && !payloadHasLiveSeconds) {
       if (cacheHasReset) {
@@ -448,8 +447,13 @@ function mergeQuotaBuckets(
 
     const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
     if (payloadEnded) {
-      if (cacheHasReset || (Number.isFinite(cacheTimeMs) && cacheTimeMs >= payloadReset)) {
+      if (cacheHasReset) {
         merged[key] = fromCache;
+      } else if (typeof cacheTimestamp === "string") {
+        const cacheTimeMs = Date.parse(cacheTimestamp);
+        if (Number.isFinite(cacheTimeMs) && cacheTimeMs >= payloadReset && cacheTimeMs <= now.getTime()) {
+          merged[key] = fromCache;
+        }
       }
       continue;
     }

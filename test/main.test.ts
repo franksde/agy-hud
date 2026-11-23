@@ -1394,6 +1394,26 @@ test("a loopback failure other than a rejection does not fall back to /usage", a
   assert.deepEqual(result.calls, { loopback: 1, usage: 0 });
 });
 
+test("quota refresh stamps the /usage cache with the query start time, not the later write time", async () => {
+  const fixture = homeFixture();
+  let duringQueryMs = 0;
+  const code = await runInHome(fixture, () => runCli(["quota", "refresh"], {
+    stdout: () => {},
+    stderr: () => {},
+    refreshQuota: async () => rejected,
+    usageQuota: async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      duringQueryMs = Date.now();
+      return usageOk;
+    }
+  }));
+  assert.equal(code, 0);
+  const cache = JSON.parse(fs.readFileSync(fixture.writePath, "utf8"));
+  const writtenMs = Date.parse(cache.timestamp);
+  assert.ok(Number.isFinite(writtenMs));
+  assert.ok(writtenMs < duringQueryMs, `expected cache timestamp (${writtenMs}) before query completion (${duringQueryMs})`);
+});
+
 test("a failing /usage keeps the cache and backs off from 60 s, doubling to a 10-minute cap", async () => {
   const fixture = homeFixture();
   writeCache(fixture.writePath, 0.4, 10_000);

@@ -1105,8 +1105,7 @@ function withIcon(config, icon, fallback) {
 function quotaInfo(cache, modelDisplay, officialQuota, now) {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    const cacheTimeMs = Date.parse(cache?.timestamp ?? "");
-    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now, cacheTimeMs);
+    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now, cache?.timestamp);
     const plan = officialQuota && geminiPlanKeys.some((key) => Object.prototype.hasOwnProperty.call(officialQuota, key)) ? officialQuota : merged;
     const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
     if (mergedInfo !== null) {
@@ -1143,7 +1142,7 @@ function liveCachedBuckets(cache, now) {
   const live = {};
   for (const [key, bucket] of Object.entries(cache.quota)) {
     const remaining = bucket?.remaining_fraction;
-    const reset = Date.parse(bucket?.reset_time ?? "");
+    const reset = typeof bucket?.reset_time === "string" ? Date.parse(bucket.reset_time) : Number.NaN;
     if (typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0 || remaining > 1 || !Number.isFinite(reset)) {
       continue;
     }
@@ -1164,7 +1163,7 @@ function liveCachedBuckets(cache, now) {
   }
   return Object.keys(live).length > 0 ? live : null;
 }
-function mergeQuotaBuckets(official, cached, now, cacheTimeMs) {
+function mergeQuotaBuckets(official, cached, now, cacheTimestamp) {
   const merged = { ...official };
   for (const [key, fromCache] of Object.entries(cached)) {
     const fromPayload = Object.prototype.hasOwnProperty.call(official, key) ? official[key] : void 0;
@@ -1174,13 +1173,12 @@ function mergeQuotaBuckets(official, cached, now, cacheTimeMs) {
     }
     const payloadRemaining = fromPayload.remaining_fraction ?? 1;
     const cacheRemaining = fromCache.remaining_fraction ?? 1;
-    const payloadReset = Date.parse(fromPayload.reset_time ?? "");
-    const cacheReset = Date.parse(fromCache.reset_time ?? "");
+    const payloadReset = typeof fromPayload.reset_time === "string" ? Date.parse(fromPayload.reset_time) : Number.NaN;
+    const cacheReset = typeof fromCache.reset_time === "string" ? Date.parse(fromCache.reset_time) : Number.NaN;
     const payloadUnset = isUnsetResetTime(payloadReset);
-    const cacheUnset = isUnsetResetTime(cacheReset);
     const payloadHasLiveSeconds = Number.isFinite(fromPayload.reset_in_seconds) && (fromPayload.reset_in_seconds ?? 0) > 0;
-    const payloadHasReset = Number.isFinite(payloadReset) && !payloadUnset;
-    const cacheHasReset = Number.isFinite(cacheReset) && !cacheUnset;
+    const payloadHasReset = Number.isFinite(payloadReset) && payloadReset > 0;
+    const cacheHasReset = Number.isFinite(cacheReset) && cacheReset > 0;
     if (payloadRemaining < 1 && payloadUnset && !payloadHasLiveSeconds) {
       if (cacheHasReset) {
         merged[key] = fromCache;
@@ -1189,8 +1187,13 @@ function mergeQuotaBuckets(official, cached, now, cacheTimeMs) {
     }
     const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
     if (payloadEnded) {
-      if (cacheHasReset || Number.isFinite(cacheTimeMs) && cacheTimeMs >= payloadReset) {
+      if (cacheHasReset) {
         merged[key] = fromCache;
+      } else if (typeof cacheTimestamp === "string") {
+        const cacheTimeMs = Date.parse(cacheTimestamp);
+        if (Number.isFinite(cacheTimeMs) && cacheTimeMs >= payloadReset && cacheTimeMs <= now.getTime()) {
+          merged[key] = fromCache;
+        }
       }
       continue;
     }
@@ -2146,8 +2149,9 @@ async function runCli(args, deps = {}) {
           if (skip !== null) {
             result = skip;
           } else {
+            const startedAt = /* @__PURE__ */ new Date();
             const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
-            result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+            result = outcome.ok ? saveUsageCache(cachePath, outcome.quota, startedAt) : { ok: false, message: outcome.message };
             recordUsageOutcome(cachePath, cliVersion, result.ok);
           }
         }
@@ -2425,10 +2429,10 @@ function takeUsageLock(lockPath, token, now) {
   }
   return false;
 }
-function saveUsageCache(cachePath, quota) {
+function saveUsageCache(cachePath, quota, timestamp = /* @__PURE__ */ new Date()) {
   try {
     import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(cachePath), { recursive: true, mode: 448 });
-    const cache = { timestamp: (/* @__PURE__ */ new Date()).toISOString(), source: "usage", models: {}, quota };
+    const cache = { timestamp: timestamp.toISOString(), source: "usage", models: {}, quota };
     import_node_fs6.default.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}
 `, { encoding: "utf8", mode: 384 });
     import_node_fs6.default.chmodSync(cachePath, 384);

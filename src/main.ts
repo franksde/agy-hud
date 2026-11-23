@@ -365,8 +365,11 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
           if (skip !== null) {
             result = skip;
           } else {
+            // Stamp the cache with the query start time rather than completion time, so a run that
+            // started before a window ended can never look like a post-reset snapshot.
+            const startedAt = new Date();
             const outcome = await (deps.usageQuota ?? (() => queryUsage()))();
-            result = outcome.ok ? saveUsageCache(cachePath, outcome.quota) : { ok: false, message: outcome.message };
+            result = outcome.ok ? saveUsageCache(cachePath, outcome.quota, startedAt) : { ok: false, message: outcome.message };
             recordUsageOutcome(cachePath, cliVersion, result.ok);
           }
         }
@@ -707,10 +710,10 @@ function takeUsageLock(lockPath: string, token: string, now: Date): boolean {
   return false;
 }
 
-function saveUsageCache(cachePath: string, quota: Record<string, CachedQuotaBucket>): RefreshResult {
+function saveUsageCache(cachePath: string, quota: Record<string, CachedQuotaBucket>, timestamp: Date = new Date()): RefreshResult {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true, mode: 0o700 });
-    const cache: Cache = { timestamp: new Date().toISOString(), source: "usage", models: {}, quota };
+    const cache: Cache = { timestamp: timestamp.toISOString(), source: "usage", models: {}, quota };
     fs.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(cachePath, 0o600);
   } catch (error) {
