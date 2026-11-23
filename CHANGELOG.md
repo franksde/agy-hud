@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.19 — 2026-11-24
+
+- `Orchestrator (Argon)` now reads the shared Gemini 5h and weekly buckets instead of Argon's standalone weekly bucket on plans that still report one. `Orchestrator (X)` plans with Gemini 4 X and executes with Gemini 4 Hydrogen, which draws on the Gemini buckets (measured on Ultra with Antigravity CLI 1.5.14).
+- Untouched `/usage` cache buckets carrying Unix epoch 0 (`1970-01-01T00:00:00Z`, observed on Antigravity CLI 1.5.15) or Go's zero time (`0001-01-01T00:00:00Z`) are kept as live `100%` readings without a countdown instead of being dropped as expired. Consumed buckets carrying only a sentinel timestamp are dropped on the cache side, yield to a live cache on the payload side, and never render fake local clock times (such as `08:00`) or crash on malformed non-string timestamps.
+- `/usage` caches now record the query start time (`startedAt`) rather than completion time, and an untouched sentinel cache reading replaces an ended payload window only when `payloadReset <= cacheTime <= now`, preventing stale pre-reset or future-dated snapshots from masquerading as post-reset readings.
+- After a mid-window server-side global quota reset, a live consumed payload whose positive `reset_time` is more than 60 seconds later than the cache's beats the stale pre-reset cache instead of being overridden by its lower remaining fraction. The guard is one-way so a shared `/usage` cache from another account cannot raise the active account's live payload.
+- Updated `README.md`, `README.zh-CN.md`, and `docs/hud-preview.png` for Antigravity CLI 1.5.15: Pro plans now fold Gemini 4 Argon into the shared `Gemini Models` quota pool (backward compatibility with CLI 1.4.x's `gemini-argon-wtu-weekly` bucket is retained), and the preview screenshot reflects CLI 1.5.15 with Gemini 4 Neon, Auto mode, and dual-window usage.
+
 ## 0.1.18 — 2026-11-21
 
 - `doctor` reads `statusLine.enabled`. `/statusline off` keeps the command in `settings.json` and sets `"enabled": false`, and the CLI then shows its built-in status line instead; `doctor` used to report that as wired. It now reports `statuslineWired: false` with a new `statuslineEnabled: false`, and tells you to run `/statusline enable` when the disabled command is agy-hud's.
