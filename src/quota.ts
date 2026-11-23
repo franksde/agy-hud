@@ -71,7 +71,7 @@ export function isUnsetResetTime(resetMs: number): boolean {
 }
 
 export function formatResetCountdown(reset: string, now: Date): string {
-  if (reset === "") {
+  if (typeof reset !== "string" || reset === "") {
     return "";
   }
   const target = new Date(reset.replace("Z", "+00:00"));

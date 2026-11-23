@@ -576,12 +576,12 @@ function officialQuotaKeys(modelDisplay: string, quota: Record<string, OfficialQ
   return [{ key: "gemini-5h", label: "5h" }, { key: "gemini-weekly", label: "W" }];
 }
 
-function formatResetClock(reset: string): string {
-  if (reset === "") {
+function formatResetClock(reset: unknown): string {
+  if (typeof reset !== "string" || reset === "") {
     return "";
   }
   const target = new Date(reset.replace("Z", "+00:00"));
-  if (Number.isNaN(target.getTime()) || isUnsetResetTime(target.getTime())) {
+  if (Number.isNaN(target.getTime()) || target.getTime() <= 0) {
     return "";
   }
   return `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;

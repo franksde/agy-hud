@@ -1174,4 +1174,17 @@ test("malformed non-string cache timestamp never crashes rendering, and negative
     "2026-11-23T20:42:00Z"
   );
   assert.match(negResetWithSeconds, /Usage \S+ 15% left ↻ Reset 30m/);
+
+  // Non-string payload reset_time (e.g. JSON number or array) and negative reset_time without countdown
+  // must neither throw nor render a fake local clock time.
+  for (const badReset of [2020, ["1970-01-01T00:00:00Z"], "1969-12-31T23:59:59Z"] as unknown[]) {
+    const out = bucketRender(
+      { "gemini-5h": { remaining_fraction: 0.2, reset_time: badReset as string } },
+      { "gemini-5h": { remaining_fraction: 0.98, reset_time: "2026-11-24T01:40:00Z" } },
+      "2026-11-23T20:43:00Z",
+      "2026-11-23T20:42:00Z"
+    );
+    assert.match(out, /Usage \S+ 20% left$/);
+    assert.doesNotMatch(out, /Reset|↻|\d\d:\d\d/);
+  }
 });
