@@ -755,13 +755,18 @@ test("single-line shows the conversation title before state and drops it first",
 
 // A `/usage` cache carries the payload's bucket shape. Each window takes the fresher of the two
 // readings: a later reset_time is a newer window, and within one window the lower remainder is newer.
-function bucketRender(payloadQuota: Payload["quota"], cacheQuota: Cache["quota"], now = "2026-06-15T03:52:00Z"): string {
+function bucketRender(
+  payloadQuota: Payload["quota"],
+  cacheQuota: Cache["quota"],
+  now = "2026-06-15T03:52:00Z",
+  cacheTimestamp = "2026-06-15T03:51:00Z"
+): string {
   const payload = fixturePayload();
   payload.terminal_width = 160;
   payload.quota = payloadQuota;
   const config = defaultConfig();
   config.color = false;
-  const cache: Cache = { timestamp: "2026-06-15T03:51:00Z", source: "usage", models: {}, quota: cacheQuota };
+  const cache: Cache = { timestamp: cacheTimestamp, source: "usage", models: {}, quota: cacheQuota };
   return strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date(now) })).split("\n")[1];
 }
 
@@ -1010,14 +1015,25 @@ test("untouched usage-cache buckets with epoch-0 reset_time still render when pa
   assert.doesNotMatch(line, /↻/);
 });
 
-test("an untouched epoch-0 cached bucket replaces an ended payload window without erasing a live consumed one", () => {
-  // Ended payload window (reset in the past) yields to a fresh untouched epoch-0 cache reading.
+test("an untouched epoch-0 cached bucket replaces an ended payload window only when sampled after reset", () => {
+  // Fresh untouched epoch-0 cache sampled after the old window ended replaces the ended payload.
   const afterReset = bucketRender(
     { "gemini-5h": { remaining_fraction: 0.2, reset_time: "2026-06-15T03:00:00Z" } },
     { "gemini-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } },
-    "2026-06-15T03:30:00Z"
+    "2026-06-15T03:30:00Z",
+    "2026-06-15T03:20:00Z"
   );
   assert.match(afterReset, /Usage \S+ 100% left$/);
+
+  // An older epoch-0 snapshot captured before the payload window ended cannot masquerade as post-reset.
+  const staleBeforeReset = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.2, reset_time: "2026-06-15T03:00:00Z" } },
+    { "gemini-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } },
+    "2026-06-15T03:30:00Z",
+    "2026-06-14T21:00:00Z"
+  );
+  assert.match(staleBeforeReset, /Usage \S+ 20% left/);
+  assert.doesNotMatch(staleBeforeReset, /100%/);
 
   // Live consumed payload window must not be overwritten by an older untouched epoch-0 cache.
   const livePayload = bucketRender(
@@ -1036,54 +1052,85 @@ test("an untouched epoch-0 cached bucket replaces an ended payload window withou
 
 // A server-side mid-window global quota reset starts a new window whose reset_time is materially
 // later than the old window's, even while the old window's reset_time is still in the future.
-test("when both readings are live and consumed, a materially later reset_time wins as the newer window", () => {
+// Only a newer payload may override a lower-remaining cache; a cache with a later reset_time and
+// higher remaining must not override the active session's payload, because the shared /usage cache
+// carries no account identity across account switches.
+test("a live consumed payload with a materially later reset_time beats a stale cache, while a later cache cannot raise a live payload", () => {
   const oldWeeklyReset = "2026-11-27T10:00:00Z";
   const newWeeklyReset = "2026-11-30T20:12:30Z";
   const now = "2026-11-23T20:43:00Z";
+  const cacheTime = "2026-11-23T20:42:00Z";
 
   // Payload already reflects the post-reset window (98% left); cache still holds pre-reset 15% left.
   const payloadNewer = bucketRender(
     { "gemini-weekly": { remaining_fraction: 0.98, reset_time: newWeeklyReset, reset_in_seconds: 602970 } },
     { "gemini-weekly": { remaining_fraction: 0.15, reset_time: oldWeeklyReset } },
-    now
+    now,
+    cacheTime
   );
   assert.match(payloadNewer, /Usage \S+ 98% left ↻ Reset 6d 23h/);
   assert.doesNotMatch(payloadNewer, /15%/);
 
-  // Cache already reflects the post-reset window (98% left); payload still holds pre-reset 15% left.
-  const cacheNewer = bucketRender(
+  // Account-switch safety: a shared cache from another account (98% left, later reset) must not
+  // overwrite the active account's lower live payload (15% left, earlier reset).
+  const cacheHigherLater = bucketRender(
     { "gemini-weekly": { remaining_fraction: 0.15, reset_time: oldWeeklyReset, reset_in_seconds: 307020 } },
     { "gemini-weekly": { remaining_fraction: 0.98, reset_time: newWeeklyReset } },
-    now
+    now,
+    cacheTime
   );
-  assert.match(cacheNewer, /Usage \S+ 98% left ↻ Reset 6d 23h/);
-  assert.doesNotMatch(cacheNewer, /15%/);
-});
+  assert.match(cacheHigherLater, /Usage \S+ 15% left ↻ Reset 3d 13h/);
+  assert.doesNotMatch(cacheHigherLater, /98%/);
 
-test("epoch-0 reset_time on a consumed bucket is never formatted as a fake clock time", () => {
-  const payload = fixturePayload();
-  payload.quota = {
-    "gemini-5h": { remaining_fraction: 0.5, reset_time: "1970-01-01T00:00:00Z", reset_in_seconds: 0 }
-  };
-  const out = strip(render(payload, { config: { ...defaultConfig(), color: false }, gitBranch: "main", now: new Date("2026-11-23T20:43:00Z") }));
-  const line2 = out.split("\n")[1];
-  assert.match(line2, /Usage \S+ 50% left$/);
-  assert.doesNotMatch(line2, /Reset|↻|\d\d:\d\d/);
-});
-
-test("consumed cached bucket with epoch-0 reset_time is ignored, and small reset skew still prefers lower remainder", () => {
-  // A consumed cached bucket without a valid future reset_time cannot be proven live, so it is dropped.
-  const dropped = bucketRender(
-    undefined,
-    { "gemini-5h": { remaining_fraction: 0.4, reset_time: "1970-01-01T00:00:00Z" } },
-    "2026-11-23T20:43:00Z"
-  );
-  assert.doesNotMatch(dropped, /Usage/);
-
-  // Within the 60 s drift tolerance, two live consumed readings are treated as the same window.
-  const skewPayload = bucketRender(
-    { "gemini-5h": { remaining_fraction: 0.85, reset_time: "2026-06-15T08:21:50Z", reset_in_seconds: 16178 } },
+  // Exact 60 s drift boundary: 60 s stays same-window (lower cache wins); 61 s treats payload as newer.
+  const atBoundary = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.9, reset_time: "2026-06-15T08:22:23Z", reset_in_seconds: 16223 } },
     { "gemini-5h": { remaining_fraction: 0.8, reset_time: fiveHourReset } }
   );
-  assert.match(skewPayload, /Usage \S+ 80% left ↻ Reset 4h 29m/);
+  assert.match(atBoundary, /Usage \S+ 80% left/);
+
+  const pastBoundary = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.9, reset_time: "2026-06-15T08:22:24Z", reset_in_seconds: 16224 } },
+    { "gemini-5h": { remaining_fraction: 0.8, reset_time: fiveHourReset } }
+  );
+  assert.match(pastBoundary, /Usage \S+ 90% left/);
+});
+
+test("epoch-0 and Go zero reset_time on a consumed payload never render fake clock times and yield to a live cache", () => {
+  for (const sentinel of ["1970-01-01T00:00:00Z", "0001-01-01T00:00:00Z"]) {
+    const payload = fixturePayload();
+    payload.quota = {
+      "gemini-5h": { remaining_fraction: 0.5, reset_time: sentinel, reset_in_seconds: 0 }
+    };
+    const out = strip(render(payload, { config: { ...defaultConfig(), color: false }, gitBranch: "main", now: new Date("2026-11-23T20:43:00Z") }));
+    const line2 = out.split("\n")[1];
+    assert.match(line2, /Usage \S+ 50% left$/);
+    assert.doesNotMatch(line2, /Reset|↻|\d\d:\d\d/);
+
+    // A consumed payload with only a sentinel reset_time yields to a cache that has a valid live window.
+    const merged = bucketRender(
+      { "gemini-5h": { remaining_fraction: 0.15, reset_time: sentinel, reset_in_seconds: 0 } },
+      { "gemini-5h": { remaining_fraction: 0.98, reset_time: "2026-11-24T01:40:00Z" } },
+      "2026-11-23T20:43:00Z",
+      "2026-11-23T20:42:00Z"
+    );
+    assert.match(merged, /Usage \S+ 98% left ↻ Reset 4h 57m/);
+  }
+});
+
+test("liveCachedBuckets rejects consumed sentinel buckets, arbitrary negative timestamps, and out-of-range fractions", () => {
+  const now = "2026-11-23T20:43:00Z";
+  const cacheTime = "2026-11-23T20:42:00Z";
+  for (const badBucket of [
+    { remaining_fraction: 0.4, reset_time: "1970-01-01T00:00:00Z" },
+    { remaining_fraction: 1, reset_time: "1969-12-31T23:59:59Z" },
+    { remaining_fraction: 1.01, reset_time: "1970-01-01T00:00:00Z" }
+  ]) {
+    const dropped = bucketRender(undefined, { "gemini-5h": badBucket }, now, cacheTime);
+    assert.doesNotMatch(dropped, /Usage/);
+  }
+
+  // Go zero time on an untouched bucket (remaining_fraction === 1) is accepted alongside Unix epoch 0.
+  const goZero = bucketRender(undefined, { "gemini-5h": { remaining_fraction: 1, reset_time: "0001-01-01T00:00:00Z" } }, now, cacheTime);
+  assert.match(goZero, /Usage \S+ 100% left$/);
 });

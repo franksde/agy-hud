@@ -271,6 +271,10 @@ function usagePercent(quota) {
   if (remaining > 1) remaining = 1;
   return Math.trunc((1 - remaining) * 100 + 0.5);
 }
+var goZeroTimeMs = Date.parse("0001-01-01T00:00:00Z");
+function isUnsetResetTime(resetMs) {
+  return resetMs === 0 || resetMs === goZeroTimeMs;
+}
 function normalize(input) {
   let out = input.toLowerCase();
   for (const old of ["gemini", "(", ")", "-", "_"]) {
@@ -1101,7 +1105,8 @@ function withIcon(config, icon, fallback) {
 function quotaInfo(cache, modelDisplay, officialQuota, now) {
   const cachedBuckets = liveCachedBuckets(cache, now);
   if (cachedBuckets !== null) {
-    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now);
+    const cacheTimeMs = Date.parse(cache?.timestamp ?? "");
+    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now, cacheTimeMs);
     const plan = officialQuota && geminiPlanKeys.some((key) => Object.prototype.hasOwnProperty.call(officialQuota, key)) ? officialQuota : merged;
     const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
     if (mergedInfo !== null) {
@@ -1130,9 +1135,6 @@ function cacheQuotaInfo(cache, modelDisplay) {
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
   return quotaDisplay([{ label: "", usagePct, reset }]);
 }
-function isUnsetResetTime(resetMs) {
-  return Number.isFinite(resetMs) && resetMs <= 0;
-}
 var windowResetDriftMs = 60 * 1e3;
 function liveCachedBuckets(cache, now) {
   if (!cache?.quota || typeof cache.quota !== "object") {
@@ -1142,11 +1144,11 @@ function liveCachedBuckets(cache, now) {
   for (const [key, bucket] of Object.entries(cache.quota)) {
     const remaining = bucket?.remaining_fraction;
     const reset = Date.parse(bucket?.reset_time ?? "");
-    if (typeof remaining !== "number" || !Number.isFinite(remaining) || !Number.isFinite(reset)) {
+    if (typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0 || remaining > 1 || !Number.isFinite(reset)) {
       continue;
     }
     if (isUnsetResetTime(reset)) {
-      if (remaining >= 1) {
+      if (remaining === 1) {
         live[key] = { remaining_fraction: remaining, reset_time: bucket.reset_time };
       }
       continue;
@@ -1162,7 +1164,7 @@ function liveCachedBuckets(cache, now) {
   }
   return Object.keys(live).length > 0 ? live : null;
 }
-function mergeQuotaBuckets(official, cached, now) {
+function mergeQuotaBuckets(official, cached, now, cacheTimeMs) {
   const merged = { ...official };
   for (const [key, fromCache] of Object.entries(cached)) {
     const fromPayload = Object.prototype.hasOwnProperty.call(official, key) ? official[key] : void 0;
@@ -1174,21 +1176,26 @@ function mergeQuotaBuckets(official, cached, now) {
     const cacheRemaining = fromCache.remaining_fraction ?? 1;
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
     const cacheReset = Date.parse(fromCache.reset_time ?? "");
-    const payloadHasReset = Number.isFinite(payloadReset) && payloadReset > 0;
-    const cacheHasReset = Number.isFinite(cacheReset) && cacheReset > 0;
-    const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
-    if (payloadEnded) {
-      merged[key] = fromCache;
+    const payloadUnset = isUnsetResetTime(payloadReset);
+    const cacheUnset = isUnsetResetTime(cacheReset);
+    const payloadHasLiveSeconds = Number.isFinite(fromPayload.reset_in_seconds) && (fromPayload.reset_in_seconds ?? 0) > 0;
+    const payloadHasReset = Number.isFinite(payloadReset) && !payloadUnset;
+    const cacheHasReset = Number.isFinite(cacheReset) && !cacheUnset;
+    if (payloadRemaining < 1 && payloadUnset && !payloadHasLiveSeconds) {
+      if (cacheHasReset) {
+        merged[key] = fromCache;
+      }
       continue;
     }
-    if (payloadRemaining < 1 && cacheRemaining < 1 && payloadHasReset && cacheHasReset) {
-      if (cacheReset - payloadReset > windowResetDriftMs) {
+    const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
+    if (payloadEnded) {
+      if (cacheHasReset || Number.isFinite(cacheTimeMs) && cacheTimeMs >= payloadReset) {
         merged[key] = fromCache;
-        continue;
       }
-      if (payloadReset - cacheReset > windowResetDriftMs) {
-        continue;
-      }
+      continue;
+    }
+    if (payloadRemaining < 1 && cacheRemaining < 1 && payloadHasReset && cacheHasReset && payloadReset - cacheReset > windowResetDriftMs) {
+      continue;
     }
     if (cacheRemaining <= payloadRemaining) {
       merged[key] = fromCache;

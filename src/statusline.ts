@@ -1,6 +1,6 @@
 import { Config } from "./config";
 import { truncateColumns, visibleLen } from "./ansi";
-import { Cache, matchModel, usagePercent as quotaUsagePercent } from "./quota";
+import { Cache, isUnsetResetTime, matchModel, usagePercent as quotaUsagePercent } from "./quota";
 import path from "node:path";
 
 const colorReset = "\x1b[0m";
@@ -337,7 +337,8 @@ function quotaInfo(cache: Cache | null | undefined, modelDisplay: string, offici
     // Which buckets apply is the plan's call, and a payload carrying Gemini quota states it for this
     // session; a cache read under another plan must not decide it. A payload without Gemini quota says
     // nothing about Argon, so then the cache is all there is.
-    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now);
+    const cacheTimeMs = Date.parse(cache?.timestamp ?? "");
+    const merged = mergeQuotaBuckets(officialQuota ?? {}, cachedBuckets, now, cacheTimeMs);
     const plan = officialQuota && geminiPlanKeys.some(key => Object.prototype.hasOwnProperty.call(officialQuota, key)) ? officialQuota : merged;
     const mergedInfo = officialQuotaInfo(merged, modelDisplay, plan);
     if (mergedInfo !== null) {
@@ -368,19 +369,14 @@ function cacheQuotaInfo(cache: Cache | null | undefined, modelDisplay: string): 
   return quotaDisplay([{ label: "", usagePct, reset }]);
 }
 
-// Go / protobuf unset timestamps serialize as Unix epoch 0 ("1970-01-01T00:00:00Z") or Go's zero
-// time ("0001-01-01T00:00:00Z"). Antigravity CLI 1.5.15+ sends epoch 0 on untouched buckets.
-function isUnsetResetTime(resetMs: number): boolean {
-  return Number.isFinite(resetMs) && resetMs <= 0;
-}
-
 // Consumed windows have a fixed reset_time; allow small clock/serialization skew before treating
-// two live consumed readings as distinct windows (for example after a mid-window global reset).
+// a live consumed payload as a newer window than the cached one (e.g. after a mid-window reset).
 const windowResetDriftMs = 60 * 1000;
 
 // The buckets a `/usage` refresh cached, minus any whose window has already reset: such a reading
-// describes a window that no longer exists. Untouched buckets (remaining_fraction >= 1) with an
-// unset epoch-0 reset_time are kept as live 100% readings with no countdown.
+// describes a window that no longer exists. Untouched buckets (remaining_fraction === 1) with an
+// unset sentinel reset_time (Unix epoch 0 or Go zero time) are kept as live 100% readings with no
+// countdown; consumed buckets with a sentinel reset_time or out-of-range values are dropped.
 function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<string, OfficialQuotaBucket> | null {
   if (!cache?.quota || typeof cache.quota !== "object") {
     return null;
@@ -389,11 +385,11 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
   for (const [key, bucket] of Object.entries(cache.quota)) {
     const remaining = bucket?.remaining_fraction;
     const reset = Date.parse(bucket?.reset_time ?? "");
-    if (typeof remaining !== "number" || !Number.isFinite(remaining) || !Number.isFinite(reset)) {
+    if (typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0 || remaining > 1 || !Number.isFinite(reset)) {
       continue;
     }
     if (isUnsetResetTime(reset)) {
-      if (remaining >= 1) {
+      if (remaining === 1) {
         live[key] = { remaining_fraction: remaining, reset_time: bucket.reset_time };
       }
       continue;
@@ -412,15 +408,19 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
 }
 
 // The payload carries no fetch time, so freshness is read off the quota itself. A payload reading
-// whose window has already reset yields to the live cached one. When both readings are live and
-// consumed (< 1) with positive reset times that differ materially, a mid-window server reset has
-// started a new window and the later reset_time wins. Otherwise, two live readings are the same
-// window (an untouched bucket's reset_time floats or sits at epoch 0), and quota only goes down
-// within a window, so the lower remainder is the more recent reading.
+// whose window has already reset yields to a live cached reading (for an untouched sentinel cache
+// with no reset_time of its own, only when the cache was sampled at or after the ended window's
+// reset_time). A consumed payload with only a sentinel reset_time and no live countdown yields to
+// a cached bucket that has a valid future reset_time. When both readings are live and consumed (< 1)
+// and the payload's reset_time is more than 60 s later than the cache's (e.g. after a mid-window
+// server reset), the payload wins; a cache with a later reset_time and higher remaining fraction
+// never raises a live payload, because the shared /usage cache carries no account identity across
+// account switches. Otherwise two live readings are the same window, and the lower remainder wins.
 function mergeQuotaBuckets(
   official: Record<string, OfficialQuotaBucket>,
   cached: Record<string, OfficialQuotaBucket>,
-  now: Date
+  now: Date,
+  cacheTimeMs: number
 ): Record<string, OfficialQuotaBucket> {
   const merged: Record<string, OfficialQuotaBucket> = { ...official };
   for (const [key, fromCache] of Object.entries(cached)) {
@@ -433,22 +433,31 @@ function mergeQuotaBuckets(
     const cacheRemaining = fromCache.remaining_fraction ?? 1;
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
     const cacheReset = Date.parse(fromCache.reset_time ?? "");
-    const payloadHasReset = Number.isFinite(payloadReset) && payloadReset > 0;
-    const cacheHasReset = Number.isFinite(cacheReset) && cacheReset > 0;
-    const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
-    if (payloadEnded) {
-      merged[key] = fromCache;
+    const payloadUnset = isUnsetResetTime(payloadReset);
+    const cacheUnset = isUnsetResetTime(cacheReset);
+    const payloadHasLiveSeconds = Number.isFinite(fromPayload.reset_in_seconds) && (fromPayload.reset_in_seconds ?? 0) > 0;
+    const payloadHasReset = Number.isFinite(payloadReset) && !payloadUnset;
+    const cacheHasReset = Number.isFinite(cacheReset) && !cacheUnset;
+
+    if (payloadRemaining < 1 && payloadUnset && !payloadHasLiveSeconds) {
+      if (cacheHasReset) {
+        merged[key] = fromCache;
+      }
       continue;
     }
-    if (payloadRemaining < 1 && cacheRemaining < 1 && payloadHasReset && cacheHasReset) {
-      if (cacheReset - payloadReset > windowResetDriftMs) {
+
+    const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
+    if (payloadEnded) {
+      if (cacheHasReset || (Number.isFinite(cacheTimeMs) && cacheTimeMs >= payloadReset)) {
         merged[key] = fromCache;
-        continue;
       }
-      if (payloadReset - cacheReset > windowResetDriftMs) {
-        continue;
-      }
+      continue;
     }
+
+    if (payloadRemaining < 1 && cacheRemaining < 1 && payloadHasReset && cacheHasReset && payloadReset - cacheReset > windowResetDriftMs) {
+      continue;
+    }
+
     // On a tie the cached reading wins too: its countdown is computed from now, the payload's from
     // whenever the CLI last fetched.
     if (cacheRemaining <= payloadRemaining) {

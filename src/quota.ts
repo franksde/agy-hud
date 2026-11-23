@@ -62,12 +62,20 @@ export function usagePercent(quota: ModelQuota): number {
   return Math.trunc((1 - remaining) * 100 + 0.5);
 }
 
+const goZeroTimeMs = Date.parse("0001-01-01T00:00:00Z");
+
+// Go / protobuf unset timestamps serialize as Unix epoch 0 ("1970-01-01T00:00:00Z") or Go's zero
+// time ("0001-01-01T00:00:00Z"). Antigravity CLI 1.5.15+ sends epoch 0 on untouched buckets.
+export function isUnsetResetTime(resetMs: number): boolean {
+  return resetMs === 0 || resetMs === goZeroTimeMs;
+}
+
 export function formatResetCountdown(reset: string, now: Date): string {
   if (reset === "") {
     return "";
   }
   const target = new Date(reset.replace("Z", "+00:00"));
-  if (Number.isNaN(target.getTime())) {
+  if (Number.isNaN(target.getTime()) || isUnsetResetTime(target.getTime())) {
     return "";
   }
   const diffMs = target.getTime() - now.getTime();
