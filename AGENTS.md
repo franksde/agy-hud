@@ -134,6 +134,13 @@ measurements behind it are in `docs/superpowers/specs/2026-09-25-usage-command-q
   profile, as dsh-agy-link does; the variable reaches only this run.
 - Fall back to `/usage` only on an authentication refusal. Any other loopback failure must behave as
   before, so older CLIs are untouched.
+- Stamp the `/usage` cache with the query start time (`startedAt` before `queryUsage()`), not
+  completion time. On CLI 1.5.15+, untouched buckets report Unix epoch 0 (`1970-01-01T00:00:00Z`),
+  and `mergeQuotaBuckets` checks `payloadReset <= cacheTime <= now` before letting an untouched
+  sentinel cache replace an ended payload window. Keep the cross-window reset guard one-way
+  (a newer live consumed payload beats a stale cache, never the reverse): the shared `/usage` cache
+  carries no account identity, so a previous account's cache must never raise the active account's
+  live payload.
 - Do not scrape the token from the CLI binary, its memory or another process's environment. CodexBar
   and its community looked hard for a sanctioned route (steipete/CodexBar#3586) and found none.
 
