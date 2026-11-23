@@ -1130,18 +1130,32 @@ function cacheQuotaInfo(cache, modelDisplay) {
   const reset = usagePct > 0 ? formatResetClock(quota.resetTime) : "";
   return quotaDisplay([{ label: "", usagePct, reset }]);
 }
+function isUnsetResetTime(resetMs) {
+  return Number.isFinite(resetMs) && resetMs <= 0;
+}
+var windowResetDriftMs = 60 * 1e3;
 function liveCachedBuckets(cache, now) {
   if (!cache?.quota || typeof cache.quota !== "object") {
     return null;
   }
   const live = {};
   for (const [key, bucket] of Object.entries(cache.quota)) {
+    const remaining = bucket?.remaining_fraction;
     const reset = Date.parse(bucket?.reset_time ?? "");
-    if (!Number.isFinite(bucket?.remaining_fraction) || !Number.isFinite(reset) || reset <= now.getTime()) {
+    if (typeof remaining !== "number" || !Number.isFinite(remaining) || !Number.isFinite(reset)) {
+      continue;
+    }
+    if (isUnsetResetTime(reset)) {
+      if (remaining >= 1) {
+        live[key] = { remaining_fraction: remaining, reset_time: bucket.reset_time };
+      }
+      continue;
+    }
+    if (reset <= now.getTime()) {
       continue;
     }
     live[key] = {
-      remaining_fraction: bucket.remaining_fraction,
+      remaining_fraction: remaining,
       reset_time: bucket.reset_time,
       reset_in_seconds: Math.trunc((reset - now.getTime()) / 1e3)
     };
@@ -1156,9 +1170,27 @@ function mergeQuotaBuckets(official, cached, now) {
       merged[key] = fromCache;
       continue;
     }
+    const payloadRemaining = fromPayload.remaining_fraction ?? 1;
+    const cacheRemaining = fromCache.remaining_fraction ?? 1;
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
-    const payloadEnded = Number.isFinite(payloadReset) && payloadReset <= now.getTime();
-    if (payloadEnded || (fromCache.remaining_fraction ?? 1) <= (fromPayload.remaining_fraction ?? 1)) {
+    const cacheReset = Date.parse(fromCache.reset_time ?? "");
+    const payloadHasReset = Number.isFinite(payloadReset) && payloadReset > 0;
+    const cacheHasReset = Number.isFinite(cacheReset) && cacheReset > 0;
+    const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
+    if (payloadEnded) {
+      merged[key] = fromCache;
+      continue;
+    }
+    if (payloadRemaining < 1 && cacheRemaining < 1 && payloadHasReset && cacheHasReset) {
+      if (cacheReset - payloadReset > windowResetDriftMs) {
+        merged[key] = fromCache;
+        continue;
+      }
+      if (payloadReset - cacheReset > windowResetDriftMs) {
+        continue;
+      }
+    }
+    if (cacheRemaining <= payloadRemaining) {
       merged[key] = fromCache;
     }
   }
@@ -1255,7 +1287,7 @@ function formatResetClock(reset) {
     return "";
   }
   const target = new Date(reset.replace("Z", "+00:00"));
-  if (Number.isNaN(target.getTime())) {
+  if (Number.isNaN(target.getTime()) || isUnsetResetTime(target.getTime())) {
     return "";
   }
   return `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;

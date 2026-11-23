@@ -31,6 +31,45 @@ test("parses /usage buckets into the payload's bucket shape", () => {
   });
 });
 
+// Shape of `agy -p /usage --output-format json` on Antigravity CLI 1.5.15 (Pro plan, Nov 2026):
+// Argon shares the Gemini Models group (no separate gemini-argon-wtu-weekly bucket) and untouched
+// third-party buckets report epoch 0 ("1970-01-01T00:00:00Z").
+test("parses CLI 1.5.15 /usage output including epoch-0 reset_time on untouched buckets", () => {
+  const stdout = JSON.stringify({
+    conversation_id: "", status: "SUCCESS", response: "", duration_seconds: 0, num_turns: 0,
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    command: {
+      name: "usage",
+      data: {
+        groups: [
+          {
+            name: "Gemini Models",
+            description: "Models within this group: Gemini 4 Neon, Gemini 4 Carbon, Gemini 4 Argon, Gemini 4 Hydrogen, Orchestrator (Neon), Orchestrator (Carbon), Orchestrator (Argon), Gemini 3.8 Flash",
+            buckets: [
+              { id: "gemini-weekly", window: "weekly", remaining_fraction: 0.9837557077407837, reset_time: "2026-11-30T20:12:30Z" },
+              { id: "gemini-5h", window: "5h", remaining_fraction: 0.9339054822921753, reset_time: "2026-11-24T01:12:30Z" }
+            ]
+          },
+          {
+            name: "Claude and GPT models",
+            description: "Models within this group: Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B",
+            buckets: [
+              { id: "3p-weekly", window: "weekly", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+              { id: "3p-5h", window: "5h", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" }
+            ]
+          }
+        ]
+      }
+    }
+  });
+  assert.deepEqual(parseUsageOutput(stdout), {
+    "gemini-weekly": { remaining_fraction: 0.9837557077407837, reset_time: "2026-11-30T20:12:30Z" },
+    "gemini-5h": { remaining_fraction: 0.9339054822921753, reset_time: "2026-11-24T01:12:30Z" },
+    "3p-weekly": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+    "3p-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" }
+  });
+});
+
 test("skips malformed buckets and rejects output with none left", () => {
   const parsed = parseUsageOutput(usageJson([
     { id: "gemini-5h", remaining_fraction: 1.5, reset_time: "2026-09-25T14:51:03Z" },

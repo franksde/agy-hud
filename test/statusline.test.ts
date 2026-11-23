@@ -987,3 +987,103 @@ test("renders a real Antigravity CLI 1.5.14 payload", () => {
     assert.ok(visibleLen(line) <= 140);
   }
 });
+
+// Antigravity CLI 1.5.15+ returns "1970-01-01T00:00:00Z" (Unix epoch 0) for untouched buckets
+// (remaining_fraction: 1) in `/usage` instead of a floating future reset timestamp.
+test("untouched usage-cache buckets with epoch-0 reset_time still render when payload has no quota", () => {
+  const payload = fixturePayload();
+  payload.terminal_width = 160;
+  payload.model = { display_name: "Claude Opus 5.5 (High)" };
+  payload.quota = undefined;
+  const config = { ...defaultConfig(), color: false };
+  const cache: Cache = {
+    timestamp: "2026-11-23T20:42:46Z",
+    source: "usage",
+    models: {},
+    quota: {
+      "3p-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+      "3p-weekly": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" }
+    }
+  };
+  const line = strip(render(payload, { config, quota: cache, gitBranch: "main", now: new Date("2026-11-23T20:43:00Z") })).split("\n")[1];
+  assert.match(line, /Usage \S+ 100% \|  \S+ 100%/);
+  assert.doesNotMatch(line, /↻/);
+});
+
+test("an untouched epoch-0 cached bucket replaces an ended payload window without erasing a live consumed one", () => {
+  // Ended payload window (reset in the past) yields to a fresh untouched epoch-0 cache reading.
+  const afterReset = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.2, reset_time: "2026-06-15T03:00:00Z" } },
+    { "gemini-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } },
+    "2026-06-15T03:30:00Z"
+  );
+  assert.match(afterReset, /Usage \S+ 100% left$/);
+
+  // Live consumed payload window must not be overwritten by an older untouched epoch-0 cache.
+  const livePayload = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset, reset_in_seconds: 16151 } },
+    { "gemini-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" } }
+  );
+  assert.match(livePayload, /Usage \S+ 85% left ↻ Reset 4h 29m/);
+
+  // Conversely, a live consumed cache reading still overrides an untouched epoch-0 payload.
+  const liveCache = bucketRender(
+    { "gemini-5h": { remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z", reset_in_seconds: 0 } },
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: fiveHourReset } }
+  );
+  assert.match(liveCache, /Usage \S+ 85% left ↻ Reset 4h 29m/);
+});
+
+// A server-side mid-window global quota reset starts a new window whose reset_time is materially
+// later than the old window's, even while the old window's reset_time is still in the future.
+test("when both readings are live and consumed, a materially later reset_time wins as the newer window", () => {
+  const oldWeeklyReset = "2026-11-27T10:00:00Z";
+  const newWeeklyReset = "2026-11-30T20:12:30Z";
+  const now = "2026-11-23T20:43:00Z";
+
+  // Payload already reflects the post-reset window (98% left); cache still holds pre-reset 15% left.
+  const payloadNewer = bucketRender(
+    { "gemini-weekly": { remaining_fraction: 0.98, reset_time: newWeeklyReset, reset_in_seconds: 602970 } },
+    { "gemini-weekly": { remaining_fraction: 0.15, reset_time: oldWeeklyReset } },
+    now
+  );
+  assert.match(payloadNewer, /Usage \S+ 98% left ↻ Reset 6d 23h/);
+  assert.doesNotMatch(payloadNewer, /15%/);
+
+  // Cache already reflects the post-reset window (98% left); payload still holds pre-reset 15% left.
+  const cacheNewer = bucketRender(
+    { "gemini-weekly": { remaining_fraction: 0.15, reset_time: oldWeeklyReset, reset_in_seconds: 307020 } },
+    { "gemini-weekly": { remaining_fraction: 0.98, reset_time: newWeeklyReset } },
+    now
+  );
+  assert.match(cacheNewer, /Usage \S+ 98% left ↻ Reset 6d 23h/);
+  assert.doesNotMatch(cacheNewer, /15%/);
+});
+
+test("epoch-0 reset_time on a consumed bucket is never formatted as a fake clock time", () => {
+  const payload = fixturePayload();
+  payload.quota = {
+    "gemini-5h": { remaining_fraction: 0.5, reset_time: "1970-01-01T00:00:00Z", reset_in_seconds: 0 }
+  };
+  const out = strip(render(payload, { config: { ...defaultConfig(), color: false }, gitBranch: "main", now: new Date("2026-11-23T20:43:00Z") }));
+  const line2 = out.split("\n")[1];
+  assert.match(line2, /Usage \S+ 50% left$/);
+  assert.doesNotMatch(line2, /Reset|↻|\d\d:\d\d/);
+});
+
+test("consumed cached bucket with epoch-0 reset_time is ignored, and small reset skew still prefers lower remainder", () => {
+  // A consumed cached bucket without a valid future reset_time cannot be proven live, so it is dropped.
+  const dropped = bucketRender(
+    undefined,
+    { "gemini-5h": { remaining_fraction: 0.4, reset_time: "1970-01-01T00:00:00Z" } },
+    "2026-11-23T20:43:00Z"
+  );
+  assert.doesNotMatch(dropped, /Usage/);
+
+  // Within the 60 s drift tolerance, two live consumed readings are treated as the same window.
+  const skewPayload = bucketRender(
+    { "gemini-5h": { remaining_fraction: 0.85, reset_time: "2026-06-15T08:21:50Z", reset_in_seconds: 16178 } },
+    { "gemini-5h": { remaining_fraction: 0.8, reset_time: fiveHourReset } }
+  );
+  assert.match(skewPayload, /Usage \S+ 80% left ↻ Reset 4h 29m/);
+});

@@ -10,7 +10,7 @@
 
 ## 运行要求
 
-- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.5.14;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
+- Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.5.15;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
 - Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
 - macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`,且 CLI 必须是通过 `cmd.exe` 运行状态栏的版本,大概是 1.1.2 或更新(见[从 GitHub Release 安装](#从-github-release-安装))。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
@@ -378,7 +378,7 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 
 ## 配额缓存
 
-在 Antigravity CLI 1.0.8 及更新版本中,`agy-hud` 会优先读取 status-line payload 里的官方 `quota` 对象。如果 payload 同时包含 5 小时和周两个窗口,HUD 会按顺序分别显示,不再折叠成一个容易误解的数字。Gemini 模型读 Gemini 的配额桶,Claude 和 GPT-OSS 读第三方模型的配额桶。`Orchestrator (X)` 用 Gemini 4 X 规划、交给 Gemini 4 Hydrogen 执行,所以读 Gemini 的配额桶,planner 是 Argon 时也一样。Ultra 套餐下(Antigravity CLI 1.5.14)实测一轮 Orchestrator 只扣了这两个桶;在 Argon 有单独周额度的套餐上,planner 消耗的那部分不会显示。Pro 套餐下 Gemini 4 Argon 有单独的周额度(Antigravity CLI 1.4.x,`gemini-argon-wtu-weekly`),没有 5 小时额度,所以只显示这一个窗口。有没有这个桶,在 payload 带有 Gemini 配额时以 payload 为准:payload 有 Gemini 配额桶但没有 Argon 桶时(例如 Ultra 套餐),读 Gemini 的配额桶,即使 Pro 套餐时留下的 `/usage` 缓存里还有 Argon 桶。payload 不带 Gemini 配额时,交给缓存判断。如果这个官方 bucket 仍然看起来完全未消耗,但新鲜的 active-model 缓存已经显示有消耗,`agy-hud` 会使用新鲜缓存,避免显示过期的 `100% left`。旧版 CLI 或没有官方配额数据的 payload,会回退到本地配额缓存。默认缓存路径为:
+在 Antigravity CLI 1.0.8 及更新版本中,`agy-hud` 会优先读取 status-line payload 里的官方 `quota` 对象。如果 payload 同时包含 5 小时和周两个窗口,HUD 会按顺序分别显示,不再折叠成一个容易误解的数字。Gemini 模型读 Gemini 的配额桶,Claude 和 GPT-OSS 读第三方模型的配额桶。`Orchestrator (X)` 用 Gemini 4 X 规划、交给 Gemini 4 Hydrogen 执行,所以读 Gemini 的配额桶,planner 是 Argon 时也一样。Ultra 套餐下(Antigravity CLI 1.5.14)实测一轮 Orchestrator 只扣了这两个桶;在 Argon 有单独周额度的套餐上,planner 消耗的那部分不会显示。当前套餐(在 CLI 1.5.15 的 Pro 和 Ultra 上验证)已将 Gemini 4 Argon 并入 Gemini 共享配额桶,同样显示 5 小时和周两个窗口。此前 Pro 套餐在 CLI 1.4.x 下的单独 Argon 周额度桶(`gemini-argon-wtu-weekly`)仍保留兼容:只要 payload 带有 Gemini 配额桶且不含该桶,就会读共享 Gemini 桶,即使旧 `/usage` 缓存里还留着 Argon 桶;payload 不带 Gemini 配额时,交给缓存判断。如果这个官方 bucket 仍然看起来完全未消耗,但新鲜的 active-model 缓存已经显示有消耗,`agy-hud` 会使用新鲜缓存,避免显示过期的 `100% left`。旧版 CLI 或没有官方配额数据的 payload,会回退到本地配额缓存。默认缓存路径为:
 
 ```text
 $XDG_CACHE_HOME/agy-hud/quota_cache.json
@@ -419,7 +419,7 @@ Windows 上没有查找 loopback 服务所需的 `ps` 和 `lsof`,所以 `quota r
 
 被拒的情况记在 `quota_cache.json.auth-rejected.json`(或 `<AGY_HUD_QUOTA_CACHE>.auth-rejected.json`)里,包括状态栏 payload 中的 CLI `version` 和失败退避。只要 payload 报的还是这个版本,刷新就直接走 `/usage`。CLI 升级后,下一次刷新会重新尝试 loopback,loopback 成功就删除这个文件。payload 里没有版本号时从不算被拒,手动执行 `quota refresh` 也总是先试 loopback。其他 loopback 失败(比如没有正在运行的服务)从不改走 `/usage`,所以旧版 CLI 的行为完全不变。
 
-`/usage` 缓存里的配额桶和 payload 的 `quota` 字段结构相同。HUD 对 5 小时和周窗口分别取两份读数中更新的那份。`reset_time` 已过的读数属于已结束的窗口:缓存里的直接忽略,payload 里的让位给缓存。两份都未过期时一定是同一个窗口,而同一窗口内额度只减不增,所以剩余更少的是更新的读数。(未被消耗的桶,`reset_time` 会随每次查询后移,不能用来判断新旧。)
+`/usage` 缓存里的配额桶和 payload 的 `quota` 字段结构相同。HUD 对 5 小时和周窗口分别取两份读数中更新的那份。正时间戳的 `reset_time` 已过时属于已结束的窗口:缓存里的直接忽略,payload 里的让位给缓存。未消耗桶若返回 Unix epoch 0(`1970-01-01T00:00:00Z`,见于 CLI 1.5.15+),会保留为有效的 `100%` 读数且不显示倒计时,不再被当成过期丢弃。两份读数都未过期且均有消耗(`< 100%`)、而 `reset_time` 明显不同时(例如服务端在窗口中途全局重置了额度),`reset_time` 更晚的那份属于新窗口并优先采用;其余未过期情况按同一窗口处理,额度只减不增,取剩余更少的一份。(未被消耗的桶,`reset_time` 会随查询后移或停在 epoch 0,不能用来判断新旧。)
 
 期望的(已脱敏)缓存结构:
 

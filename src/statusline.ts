@@ -368,21 +368,42 @@ function cacheQuotaInfo(cache: Cache | null | undefined, modelDisplay: string): 
   return quotaDisplay([{ label: "", usagePct, reset }]);
 }
 
+// Go / protobuf unset timestamps serialize as Unix epoch 0 ("1970-01-01T00:00:00Z") or Go's zero
+// time ("0001-01-01T00:00:00Z"). Antigravity CLI 1.5.15+ sends epoch 0 on untouched buckets.
+function isUnsetResetTime(resetMs: number): boolean {
+  return Number.isFinite(resetMs) && resetMs <= 0;
+}
+
+// Consumed windows have a fixed reset_time; allow small clock/serialization skew before treating
+// two live consumed readings as distinct windows (for example after a mid-window global reset).
+const windowResetDriftMs = 60 * 1000;
+
 // The buckets a `/usage` refresh cached, minus any whose window has already reset: such a reading
-// describes a window that no longer exists.
+// describes a window that no longer exists. Untouched buckets (remaining_fraction >= 1) with an
+// unset epoch-0 reset_time are kept as live 100% readings with no countdown.
 function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<string, OfficialQuotaBucket> | null {
   if (!cache?.quota || typeof cache.quota !== "object") {
     return null;
   }
   const live: Record<string, OfficialQuotaBucket> = {};
   for (const [key, bucket] of Object.entries(cache.quota)) {
+    const remaining = bucket?.remaining_fraction;
     const reset = Date.parse(bucket?.reset_time ?? "");
-    if (!Number.isFinite(bucket?.remaining_fraction) || !Number.isFinite(reset) || reset <= now.getTime()) {
+    if (typeof remaining !== "number" || !Number.isFinite(remaining) || !Number.isFinite(reset)) {
+      continue;
+    }
+    if (isUnsetResetTime(reset)) {
+      if (remaining >= 1) {
+        live[key] = { remaining_fraction: remaining, reset_time: bucket.reset_time };
+      }
+      continue;
+    }
+    if (reset <= now.getTime()) {
       continue;
     }
     // A countdown from now, so a cached window reads like one straight from the payload.
     live[key] = {
-      remaining_fraction: bucket.remaining_fraction,
+      remaining_fraction: remaining,
       reset_time: bucket.reset_time,
       reset_in_seconds: Math.trunc((reset - now.getTime()) / 1000)
     };
@@ -390,11 +411,12 @@ function liveCachedBuckets(cache: Cache | null | undefined, now: Date): Record<s
   return Object.keys(live).length > 0 ? live : null;
 }
 
-// The payload carries no fetch time, so freshness is read off the quota itself. A bucket has at most
-// one live window: a payload reading whose window has already reset yields to the live cached one.
-// Two live readings are the same window, whatever their reset times say (an untouched bucket's
-// reset_time floats with the query time), and quota only goes down within a window, so the lower
-// remainder is the more recent reading. Cached readings of an ended window never get this far.
+// The payload carries no fetch time, so freshness is read off the quota itself. A payload reading
+// whose window has already reset yields to the live cached one. When both readings are live and
+// consumed (< 1) with positive reset times that differ materially, a mid-window server reset has
+// started a new window and the later reset_time wins. Otherwise, two live readings are the same
+// window (an untouched bucket's reset_time floats or sits at epoch 0), and quota only goes down
+// within a window, so the lower remainder is the more recent reading.
 function mergeQuotaBuckets(
   official: Record<string, OfficialQuotaBucket>,
   cached: Record<string, OfficialQuotaBucket>,
@@ -407,11 +429,29 @@ function mergeQuotaBuckets(
       merged[key] = fromCache;
       continue;
     }
+    const payloadRemaining = fromPayload.remaining_fraction ?? 1;
+    const cacheRemaining = fromCache.remaining_fraction ?? 1;
     const payloadReset = Date.parse(fromPayload.reset_time ?? "");
-    const payloadEnded = Number.isFinite(payloadReset) && payloadReset <= now.getTime();
+    const cacheReset = Date.parse(fromCache.reset_time ?? "");
+    const payloadHasReset = Number.isFinite(payloadReset) && payloadReset > 0;
+    const cacheHasReset = Number.isFinite(cacheReset) && cacheReset > 0;
+    const payloadEnded = payloadHasReset && payloadReset <= now.getTime();
+    if (payloadEnded) {
+      merged[key] = fromCache;
+      continue;
+    }
+    if (payloadRemaining < 1 && cacheRemaining < 1 && payloadHasReset && cacheHasReset) {
+      if (cacheReset - payloadReset > windowResetDriftMs) {
+        merged[key] = fromCache;
+        continue;
+      }
+      if (payloadReset - cacheReset > windowResetDriftMs) {
+        continue;
+      }
+    }
     // On a tie the cached reading wins too: its countdown is computed from now, the payload's from
     // whenever the CLI last fetched.
-    if (payloadEnded || (fromCache.remaining_fraction ?? 1) <= (fromPayload.remaining_fraction ?? 1)) {
+    if (cacheRemaining <= payloadRemaining) {
       merged[key] = fromCache;
     }
   }
@@ -502,9 +542,10 @@ function noQuota(): QuotaDisplay {
   return { usagePct: 0, reset: "", hasQuota: false, windows: [] };
 }
 
-// On a Pro plan, CLI 1.4.x's /usage lists Gemini 4 Argon as a group of its own with a weekly limit and
-// no 5-hour one, so neither Gemini bucket applies to it. Ultra plans count Argon against the Gemini
-// buckets and send no Argon bucket, which is why its absence falls through to them.
+// Historically (CLI 1.4.x on Pro plans), /usage listed Gemini 4 Argon as a group of its own with a
+// weekly limit and no 5-hour one. Current plans (observed on Pro and Ultra with CLI 1.5.15) count
+// Argon against the shared Gemini buckets and send no Argon bucket; its absence falls through to
+// them, while keeping compatibility whenever a payload or cache still carries the separate bucket.
 const argonWeeklyKey = "gemini-argon-wtu-weekly";
 // The buckets whose presence tells which of the two a plan is.
 const geminiPlanKeys = ["gemini-5h", "gemini-weekly", argonWeeklyKey];
@@ -527,7 +568,7 @@ function formatResetClock(reset: string): string {
     return "";
   }
   const target = new Date(reset.replace("Z", "+00:00"));
-  if (Number.isNaN(target.getTime())) {
+  if (Number.isNaN(target.getTime()) || isUnsetResetTime(target.getTime())) {
     return "";
   }
   return `${pad2(target.getHours())}:${pad2(target.getMinutes())}`;
