@@ -5,6 +5,7 @@ import path from "node:path";
 import { strip, visibleLen } from "../src/ansi";
 import { defaultConfig, Config } from "../src/config";
 import { Cache } from "../src/quota";
+import { TokenMetrics } from "../src/tokenMetrics";
 import { Payload, render, shortModelName, formatCost } from "../src/statusline";
 
 function fixturePayload(): Payload {
@@ -1187,4 +1188,120 @@ test("malformed non-string cache timestamp never crashes rendering, and negative
     assert.match(out, /Usage \S+ 20% left$/);
     assert.doesNotMatch(out, /Reset|↻|\d\d:\d\d/);
   }
+});
+
+test("multiline renders token consumption, cache hit rate, exact speed and TTFT on line 3", () => {
+  const payload = { ...fixturePayload(), terminal_width: 120 };
+  const metrics: TokenMetrics = {
+    source: "db",
+    inputTokens: 142_000,
+    cacheReadTokens: 720_000,
+    outputTokens: 18_500,
+    thinkingTokens: 10_000,
+    tokensPerSecond: 132.4,
+    speedEstimated: false,
+    ttftSeconds: 5.62,
+    turns: 8
+  };
+  const out = strip(render(payload, {
+    config: { ...defaultConfig(), color: false },
+    gitBranch: "main",
+    tokenMetrics: metrics,
+    now: new Date("2026-05-19T12:00:00Z")
+  }));
+  const lines = out.split("\n");
+  assert.equal(lines.length, 3);
+  assert.equal(lines[2], "Tok 142k in · 720k hit (84%) · 19k out │ 132 tok/s · TTFT 5.6s");
+  assert.doesNotMatch(out.toLowerCase(), /token/);
+});
+
+test("Plan A estimated speed carries a tilde prefix and omits TTFT", () => {
+  const payload = { ...fixturePayload(), terminal_width: 120 };
+  const metrics: TokenMetrics = {
+    source: "transcript",
+    inputTokens: 20_000,
+    cacheReadTokens: 60_000,
+    outputTokens: 1_200,
+    tokensPerSecond: 9.44,
+    speedEstimated: true,
+    turns: 2
+  };
+  const lines = strip(render(payload, {
+    config: { ...defaultConfig(), color: false },
+    tokenMetrics: metrics
+  })).split("\n");
+  assert.equal(lines.length, 3);
+  assert.equal(lines[2], "Tok 20k in · 60k hit (75%) · 1k out │ ~9.4 tok/s");
+});
+
+test("token metrics respect show_tokens and show_token_speed toggles and omit cache hit when unknown", () => {
+  const payload = { ...fixturePayload(), terminal_width: 120 };
+  const metrics: TokenMetrics = {
+    source: "transcript",
+    inputTokens: 125_000,
+    outputTokens: 5_000,
+    tokensPerSecond: 85,
+    speedEstimated: true
+  };
+
+  // Both on, no cacheReadTokens -> no fake 0% hit
+  const both = strip(render(payload, { config: { ...defaultConfig(), color: false }, tokenMetrics: metrics })).split("\n");
+  assert.equal(both.length, 3);
+  assert.equal(both[2], "Tok 125k in · 5k out │ ~85 tok/s");
+
+  // Tokens only
+  const tokensOnly = strip(render(payload, {
+    config: { ...defaultConfig(), color: false, showTokenSpeed: false },
+    tokenMetrics: metrics
+  })).split("\n");
+  assert.equal(tokensOnly.length, 3);
+  assert.equal(tokensOnly[2], "Tok 125k in · 5k out");
+
+  // Speed only
+  const speedOnly = strip(render(payload, {
+    config: { ...defaultConfig(), color: false, showTokens: false },
+    tokenMetrics: metrics
+  })).split("\n");
+  assert.equal(speedOnly.length, 3);
+  assert.equal(speedOnly[2], "~85 tok/s");
+
+  // Both off -> stays 2 lines
+  const off = strip(render(payload, {
+    config: { ...defaultConfig(), color: false, showTokens: false, showTokenSpeed: false },
+    tokenMetrics: metrics
+  })).split("\n");
+  assert.equal(off.length, 2);
+});
+
+test("line 3 and single-line token metrics degrade cleanly within narrow terminal widths", () => {
+  const metrics: TokenMetrics = {
+    source: "db",
+    inputTokens: 142_000,
+    cacheReadTokens: 720_000,
+    outputTokens: 18_500,
+    tokensPerSecond: 132,
+    speedEstimated: false,
+    ttftSeconds: 5.6
+  };
+  for (const multiline of [true, false]) {
+    for (const width of [15, 25, 40, 55, 70, 120]) {
+      const out = render({ ...fixturePayload(), terminal_width: width }, {
+        config: { ...defaultConfig(), multiline },
+        gitBranch: "main",
+        tokenMetrics: metrics
+      });
+      for (const line of out.split("\n")) {
+        assert.ok(visibleLen(line) <= width, `multiline=${multiline} width=${width} exceeded by ${JSON.stringify(strip(line))}`);
+      }
+    }
+  }
+
+  // Single-line wide terminal includes compact token and speed summary
+  const wideSingle = strip(render({ ...fixturePayload(), terminal_width: 140 }, {
+    config: { ...defaultConfig(), multiline: false, color: false, showIcons: false },
+    tokenMetrics: metrics
+  }));
+  assert.doesNotMatch(wideSingle, /\n/);
+  assert.match(wideSingle, /Tok 862k\/19k \(84%\)/);
+  assert.match(wideSingle, /132 tok\/s/);
 });

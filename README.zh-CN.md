@@ -354,6 +354,9 @@ node <插件根目录>/dist/agy-hud.js doctor --json
   "show_title": false,
   "show_mode": true,
   "show_icons": true,
+  "show_tokens": true,
+  "show_token_speed": true,
+  "token_metrics_source": "transcript",
   "context_value": "percent",
   "usage_value": "remaining"
 }
@@ -369,6 +372,12 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 - `show_mode`:在模型段末尾、目录之前显示用 `Shift+Tab` 切换的 agent 模式(Antigravity CLI 1.3.5+):`Plan`、`Accept Edits` 或 `Auto`,分别为青色、黄色、橙色。`default` 模式(`cycle_mode` 缺失或为 `"default"`)不显示;注意自 Antigravity CLI 1.5.7 起,支持 Auto 模式的账号默认即以 `auto` 模式启动,因此新会话启动时就会显示 `Auto`,切到 `default` 模式才会隐藏。默认情况下自定义状态栏会替换 CLI 的内置状态栏,而开始打字后,内置状态栏是唯一还显示模式的地方(在 `settings.json` 的 `statusLine` 里设置 `"stack_with_default": true` 可以叠加显示在内置状态栏下方;`/statusline off` 会写入 `"enabled": false` 暂停自定义状态栏,运行 `/statusline enable` 恢复)。默认开启。
 - `show_title`:显示 Antigravity CLI 1.1.27+ 提供的会话标题 `conversation_title`,位于分支与 agent 状态之间(单行模式在状态之前)。默认关闭。标题会被整理成单行纯文本、去掉控制字符,最多占 24 列;一行放不下时它最先被省略,早于费用。
 - `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。跑 `doctor` 可以看到图标探针和确切的修复方式;完整说明见[图标显示成方块](#图标显示成方块)。
+- `show_tokens`:在多行模式下新增紧凑的第 3 行(单行模式空间充足时内联展示)显示当前会话累计 token 消耗与缓存命中率,例如 `Tok 142k in · 720k hit (84%) · 19k out`。尚无消耗数据时自动省略。默认开启。
+- `show_token_speed`:与 token 消耗并排显示模型输出速度(`tok/s`,使用 `"db"` 数据源时还会附带首字延迟 `TTFT`)。来自状态栏重绘采样的估算速率带 `~` 前缀。默认开启。
+- `token_metrics_source`:选择 token 消耗与速度的采集方案:
+  - `"transcript"`(默认,推荐):基于官方 stdin `context_window` 字段并按字节偏移增量读取 `payload.transcript_path`(`transcript.jsonl`),累计未缓存输入、缓存命中与输出 token,同时通过状态栏重绘采样估算输出速率(`~tok/s`)。零数据库依赖,兼容 Node 18+。
+  - `"db"`:通过 Node 内置的 `node:sqlite`(需 Node 22.5+)只读查询本地会话数据库 `conversations/<conversation_id>.db` 中的 `gen_metadata` Protobuf 记录,获取精确的累计 token 消耗、纯解码速率(`tok/s`)与首字延迟(`TTFT`)。依赖 CLI 内部存储结构,不可用时静默省略。
+  - `"auto"`:优先尝试 `"db"`,不可用时自动降级到 `"transcript"`。
 - `context_value`:`percent`、`tokens` 或 `both`。默认为 `percent`,即上下文显示当前输入侧窗口占用率。存在 token 总量时,百分比和进度条会由 `total_input_tokens / context_window_size` 计算,避免最近一次长输出让 HUD 跳动。
 - `usage_value`:`remaining` 或 `percent`。默认为 `remaining`,即配额文字和进度条都显示剩余量。当 Antigravity 提供 5 小时和周两个窗口时,HUD 会按顺序分开显示各自的刷新倒计时,例如 `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`。
 

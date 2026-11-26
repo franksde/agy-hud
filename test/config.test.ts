@@ -78,6 +78,29 @@ test("show_mode is on by default and honored from config JSON", () => {
   assert.equal(parseConfig(JSON.stringify({ show_mode: false })).showMode, false);
 });
 
+test("token metrics options have safe defaults and honor valid overrides", () => {
+  const defaults = defaultConfig();
+  assert.equal(defaults.showTokens, true);
+  assert.equal(defaults.showTokenSpeed, true);
+  assert.equal(defaults.tokenMetricsSource, "transcript");
+
+  const dbCfg = parseConfig(JSON.stringify({
+    show_tokens: false,
+    show_token_speed: false,
+    token_metrics_source: "db"
+  }));
+  assert.equal(dbCfg.showTokens, false);
+  assert.equal(dbCfg.showTokenSpeed, false);
+  assert.equal(dbCfg.tokenMetricsSource, "db");
+
+  assert.equal(parseConfig(JSON.stringify({ token_metrics_source: "auto" })).tokenMetricsSource, "auto");
+  assert.equal(parseConfig(JSON.stringify({ token_metrics_source: "transcript" })).tokenMetricsSource, "transcript");
+
+  for (const invalid of ["", "sqlite", "DB", 42, null, true]) {
+    assert.equal(parseConfig(JSON.stringify({ token_metrics_source: invalid })).tokenMetricsSource, "transcript");
+  }
+});
+
 // Notepad and Windows PowerShell's Set-Content -Encoding utf8 write a UTF-8 BOM. JSON.parse rejects
 // it, which used to drop the whole file silently and render with the defaults.
 test("a config file that starts with a UTF-8 byte order mark is still read", () => {

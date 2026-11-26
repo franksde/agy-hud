@@ -355,6 +355,9 @@ Default config:
   "show_title": false,
   "show_mode": true,
   "show_icons": true,
+  "show_tokens": true,
+  "show_token_speed": true,
+  "token_metrics_source": "transcript",
   "context_value": "percent",
   "usage_value": "remaining"
 }
@@ -370,6 +373,12 @@ Display options:
 - `show_mode`: shows the agent mode chosen with `Shift+Tab` (Antigravity CLI 1.3.5+) at the end of the model segment, before the directory: `Plan`, `Accept Edits` or `Auto`, in cyan, yellow and orange respectively. The `default` mode (`cycle_mode` absent or `"default"`) shows nothing; note that since Antigravity CLI 1.5.7, sessions start in `auto` mode by default wherever Auto mode is available, so `Auto` appears at startup until you switch to `default`. By default a custom status line replaces the CLI's built-in one, which is otherwise the only place the mode stays visible once you start typing (in `settings.json`, `"statusLine": { ..., "stack_with_default": true }` stacks it below the built-in bar instead, and `/statusline off` sets `"enabled": false` to pause the custom command until `/statusline enable`). On by default.
 - `show_title`: shows the conversation title supplied as `conversation_title` by Antigravity CLI 1.1.27+, between the branch and the agent state (before the state on the single line). Off by default. It is reduced to one plain line with control characters removed, clipped to 24 columns, and is the first segment dropped when the line does not fit, before cost.
 - `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes. Run `doctor` to see the icon probe and the exact fix; [Icons Render As Boxes](#icons-render-as-boxes) covers the whole question.
+- `show_tokens`: shows cumulative session token consumption (`Tok <in> in · <cache> hit (<pct>%) · <out> out`) on a compact third line in multiline mode (or inline in single-line mode when space allows). Omitted when no token usage is available yet. On by default.
+- `show_token_speed`: shows model output speed (`tok/s`, plus `TTFT` when `token_metrics_source` uses the local conversation DB) alongside token consumption on line 3 (or inline in single-line mode). Estimated speeds from status-line redraw sampling carry a `~` prefix. On by default.
+- `token_metrics_source`: selects how token consumption and speed are gathered:
+  - `"transcript"` (default, recommended): uses official stdin `context_window` fields plus incremental byte-offset reads of `payload.transcript_path` (`transcript.jsonl`) for cumulative uncached input, cache-read, and output tokens, and samples output rate across status-line redraws (`~tok/s`). Works on Node 18+ with zero database dependencies.
+  - `"db"`: opens the local Antigravity conversation SQLite database (`conversations/<conversation_id>.db`) read-only via Node's built-in `node:sqlite` (requires Node 22.5+) and decodes `gen_metadata` Protobuf records for exact cumulative token counts, decode speed (`tok/s`), and `TTFT`. Relies on internal CLI storage fields and omits metrics cleanly if unavailable.
+  - `"auto"`: prefers `"db"` when available and falls back automatically to `"transcript"`.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.
 - `usage_value`: `remaining` or `percent`. Default is `remaining`, so quota text and bar show what is left. When Antigravity provides both windows, the HUD shows them separately with per-window reset durations, for example `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`.
 

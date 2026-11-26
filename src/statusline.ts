@@ -1,6 +1,7 @@
 import { Config } from "./config";
 import { truncateColumns, visibleLen } from "./ansi";
 import { Cache, isUnsetResetTime, matchModel, usagePercent as quotaUsagePercent } from "./quota";
+import type { TokenMetrics } from "./tokenMetrics";
 import path from "node:path";
 
 const colorReset = "\x1b[0m";
@@ -77,6 +78,7 @@ interface QuotaDisplay {
 export interface RenderOptions {
   config: Config;
   quota?: Cache | null;
+  tokenMetrics?: TokenMetrics | null;
   gitBranch?: string;
   now?: Date;
 }
@@ -139,12 +141,22 @@ export function render(payload: Payload, opts: RenderOptions): string {
   const stateLabel = state(payload.agent_state ?? "");
   const quota = quotaInfo(opts.quota, modelDisplay, payload.quota, opts.now ?? new Date());
   if (config.multiline) {
-    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel);
+    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel, opts.tokenMetrics ?? null);
   }
-  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel);
+  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel, opts.tokenMetrics ?? null);
 }
 
-function renderMultiline(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quota: QuotaDisplay, branch: string, stateLabel: string): string {
+function renderMultiline(
+  payload: Payload,
+  config: Config,
+  width: number,
+  modelSegment: string,
+  ctxPct: number,
+  quota: QuotaDisplay,
+  branch: string,
+  stateLabel: string,
+  tokenMetrics: TokenMetrics | null
+): string {
   const line1Parts = [colorize(modelSegment, colorBlue, config.color)];
   if (config.showCWD && payload.cwd) {
     line1Parts.push(colorize(withIcon(config, " ", "") + path.basename(payload.cwd), colorYellow, config.color));
@@ -221,10 +233,20 @@ function renderMultiline(payload: Payload, config: Config, width: number, modelS
     line2 = `${formatInt(ctxPct)}%`;
   }
   line2 = fit(line2, width);
-  return `${line1}\n${line2}`;
+  const line3 = renderTokenLine(tokenMetrics, config, width);
+  return line3 !== "" ? `${line1}\n${line2}\n${line3}` : `${line1}\n${line2}`;
 }
 
-function renderSingleLine(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quota: QuotaDisplay, stateLabel: string): string {
+function renderSingleLine(
+  payload: Payload,
+  config: Config,
+  width: number,
+  modelSegment: string,
+  ctxPct: number,
+  quota: QuotaDisplay,
+  stateLabel: string,
+  tokenMetrics: TokenMetrics | null
+): string {
   const coloredBadge = colorize(modelSegment, colorBlue, config.color);
   const ctx = `Ctx ${contextValue(config, payload.context_window, ctxPct)}`;
   let tokens = tokenDetail(payload.context_window);
@@ -244,12 +266,15 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   const costText = renderCost(payload.cost, config);
   const titleText = renderTitle(payload.conversation_title, config);
+  const { tokText, speedText } = renderSingleLineTokenParts(tokenMetrics, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
-    [coloredBadge, ctx, tokens, bar, usage, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage, tokText, speedText, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage, tokText, speedText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage, speedText, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage, stateText],
     [coloredBadge, ctx, bar, usage, stateText],
@@ -265,6 +290,126 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
     }
   }
   return fit(`${formatInt(ctxPct)}% ${stateLabel}`, width);
+}
+
+function hasTokenCounts(metrics: TokenMetrics | null): metrics is TokenMetrics {
+  if (!metrics) return false;
+  return (
+    (Number.isFinite(metrics.inputTokens) && metrics.inputTokens > 0) ||
+    (Number.isFinite(metrics.outputTokens) && metrics.outputTokens > 0) ||
+    (typeof metrics.cacheReadTokens === "number" && Number.isFinite(metrics.cacheReadTokens) && metrics.cacheReadTokens > 0)
+  );
+}
+
+function cacheHitPercent(inputTokens: number, cacheReadTokens: number): number {
+  const totalIn = inputTokens + cacheReadTokens;
+  if (totalIn <= 0) return 0;
+  return clampInt(Math.trunc((cacheReadTokens / totalIn) * 100 + 0.5));
+}
+
+function cacheHitColor(pct: number): string {
+  if (pct >= 70) return colorGreen;
+  if (pct >= 30) return colorYellow;
+  return colorMuted;
+}
+
+function formatSpeed(tps: number): string {
+  if (tps >= 10) {
+    return Math.round(tps).toString(10);
+  }
+  return tps.toFixed(1);
+}
+
+function formatDurationSec(seconds: number): string {
+  return `${seconds.toFixed(1)}s`;
+}
+
+function renderTokenLine(metrics: TokenMetrics | null, config: Config, width: number): string {
+  if (!metrics || (!config.showTokens && !config.showTokenSpeed)) {
+    return "";
+  }
+  const showCounts = config.showTokens && hasTokenCounts(metrics);
+  const hasCache = showCounts && typeof metrics.cacheReadTokens === "number" && Number.isFinite(metrics.cacheReadTokens) && metrics.cacheReadTokens >= 0;
+  const inputTokens = showCounts ? Math.max(0, metrics.inputTokens) : 0;
+  const cacheRead = hasCache ? Math.max(0, metrics.cacheReadTokens!) : 0;
+  const outputTokens = showCounts ? Math.max(0, metrics.outputTokens) : 0;
+  const totalIn = inputTokens + cacheRead;
+
+  let fullTok = "";
+  let mediumTok = "";
+  let compactTok = "";
+  if (showCounts) {
+    if (hasCache) {
+      const hitPct = cacheHitPercent(inputTokens, cacheRead);
+      const hitBadge = colorize(`(${formatInt(hitPct)}%)`, cacheHitColor(hitPct), config.color);
+      const hitCompactBadge = colorize(`(${formatInt(hitPct)}% hit)`, cacheHitColor(hitPct), config.color);
+      fullTok = `Tok ${formatTokens(inputTokens)} in · ${formatTokens(cacheRead)} hit ${hitBadge} · ${formatTokens(outputTokens)} out`;
+      mediumTok = `Tok ${formatTokens(inputTokens)} in ${hitCompactBadge} · ${formatTokens(outputTokens)} out`;
+      compactTok = `Tok ${formatTokens(totalIn)}/${formatTokens(outputTokens)}`;
+    } else {
+      fullTok = `Tok ${formatTokens(inputTokens)} in · ${formatTokens(outputTokens)} out`;
+      mediumTok = `Tok ${formatTokens(inputTokens)}/${formatTokens(outputTokens)}`;
+      compactTok = mediumTok;
+    }
+  }
+
+  let fullSpeed = "";
+  let compactSpeed = "";
+  const tps = metrics.tokensPerSecond;
+  if (config.showTokenSpeed && typeof tps === "number" && Number.isFinite(tps) && tps > 0) {
+    const rateRaw = `${metrics.speedEstimated ? "~" : ""}${formatSpeed(tps)} tok/s`;
+    compactSpeed = colorize(rateRaw, colorCyan, config.color);
+    const ttft = metrics.ttftSeconds;
+    if (typeof ttft === "number" && Number.isFinite(ttft) && ttft > 0) {
+      fullSpeed = `${compactSpeed} · ${colorize(`TTFT ${formatDurationSec(ttft)}`, colorMuted, config.color)}`;
+    } else {
+      fullSpeed = compactSpeed;
+    }
+  }
+
+  if (fullTok === "" && fullSpeed === "") {
+    return "";
+  }
+
+  const candidates = [
+    joinHeader(fullTok, fullSpeed),
+    joinHeader(fullTok, compactSpeed),
+    joinHeader(mediumTok, compactSpeed),
+    joinHeader(compactTok, compactSpeed),
+    compactTok !== "" ? compactTok : compactSpeed
+  ].filter(line => line !== "");
+
+  for (const line of candidates) {
+    if (visibleLen(line) <= width) {
+      return line;
+    }
+  }
+  return fit(candidates[candidates.length - 1] ?? "", width);
+}
+
+function renderSingleLineTokenParts(metrics: TokenMetrics | null, config: Config): { tokText: string; speedText: string } {
+  if (!metrics) {
+    return { tokText: "", speedText: "" };
+  }
+  let tokText = "";
+  if (config.showTokens && hasTokenCounts(metrics)) {
+    const hasCache = typeof metrics.cacheReadTokens === "number" && Number.isFinite(metrics.cacheReadTokens) && metrics.cacheReadTokens >= 0;
+    const inputTokens = Math.max(0, metrics.inputTokens);
+    const cacheRead = hasCache ? Math.max(0, metrics.cacheReadTokens!) : 0;
+    const outputTokens = Math.max(0, metrics.outputTokens);
+    const raw = hasCache
+      ? `Tok ${formatTokens(inputTokens + cacheRead)}/${formatTokens(outputTokens)} (${formatInt(cacheHitPercent(inputTokens, cacheRead))}%)`
+      : `Tok ${formatTokens(inputTokens)}/${formatTokens(outputTokens)}`;
+    tokText = colorize(raw, colorMuted, config.color);
+  }
+
+  let speedText = "";
+  const tps = metrics.tokensPerSecond;
+  if (config.showTokenSpeed && typeof tps === "number" && Number.isFinite(tps) && tps > 0) {
+    const raw = `${metrics.speedEstimated ? "~" : ""}${formatSpeed(tps)} tok/s`;
+    speedText = colorize(raw, colorCyan, config.color);
+  }
+  return { tokText, speedText };
 }
 
 function renderModelSegment(shortModel: string, rawPlan: string, config: Config): string {

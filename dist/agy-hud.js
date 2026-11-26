@@ -164,9 +164,9 @@ __export(main_exports, {
   version: () => version
 });
 module.exports = __toCommonJS(main_exports);
-var import_node_fs6 = __toESM(require("node:fs"));
-var import_node_os2 = __toESM(require("node:os"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs7 = __toESM(require("node:fs"));
+var import_node_os3 = __toESM(require("node:os"));
+var import_node_path6 = __toESM(require("node:path"));
 var import_node_child_process3 = require("node:child_process");
 var import_node_crypto = require("node:crypto");
 
@@ -185,6 +185,9 @@ function defaultConfig() {
     showTitle: false,
     showMode: true,
     showIcons: true,
+    showTokens: true,
+    showTokenSpeed: true,
+    tokenMetricsSource: "transcript",
     contextValue: "percent",
     usageValue: "remaining",
     debug: false
@@ -224,6 +227,11 @@ function merge(base, patch) {
   if (typeof patch.show_title === "boolean") base.showTitle = patch.show_title;
   if (typeof patch.show_mode === "boolean") base.showMode = patch.show_mode;
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
+  if (typeof patch.show_tokens === "boolean") base.showTokens = patch.show_tokens;
+  if (typeof patch.show_token_speed === "boolean") base.showTokenSpeed = patch.show_token_speed;
+  if (patch.token_metrics_source === "transcript" || patch.token_metrics_source === "db" || patch.token_metrics_source === "auto") {
+    base.tokenMetricsSource = patch.token_metrics_source;
+  }
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
   if (typeof patch.debug === "boolean") base.debug = patch.debug;
@@ -928,11 +936,11 @@ function render(payload, opts) {
   const stateLabel = state(payload.agent_state ?? "");
   const quota = quotaInfo(opts.quota, modelDisplay, payload.quota, opts.now ?? /* @__PURE__ */ new Date());
   if (config.multiline) {
-    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel);
+    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel, opts.tokenMetrics ?? null);
   }
-  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel);
+  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel, opts.tokenMetrics ?? null);
 }
-function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, branch2, stateLabel) {
+function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, branch2, stateLabel, tokenMetrics) {
   const line1Parts = [colorize(modelSegment, colorBlue, config.color)];
   if (config.showCWD && payload.cwd) {
     line1Parts.push(colorize(withIcon(config, "\uF07C ", "") + import_node_path4.default.basename(payload.cwd), colorYellow, config.color));
@@ -1006,10 +1014,13 @@ function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, br
     line2 = `${formatInt(ctxPct)}%`;
   }
   line2 = fit(line2, width);
-  return `${line1}
+  const line3 = renderTokenLine(tokenMetrics, config, width);
+  return line3 !== "" ? `${line1}
+${line2}
+${line3}` : `${line1}
 ${line2}`;
 }
-function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel) {
+function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel, tokenMetrics) {
   const coloredBadge = colorize(modelSegment, colorBlue, config.color);
   const ctx = `Ctx ${contextValue(config, payload.context_window, ctxPct)}`;
   let tokens = tokenDetail(payload.context_window);
@@ -1029,12 +1040,15 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   const costText = renderCost(payload.cost, config);
   const titleText = renderTitle(payload.conversation_title, config);
+  const { tokText, speedText } = renderSingleLineTokenParts(tokenMetrics, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
-    [coloredBadge, ctx, tokens, bar, usage2, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage2, tokText, speedText, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage2, tokText, speedText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage2, speedText, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText],
     [coloredBadge, ctx, bar, usage2, stateText],
@@ -1050,6 +1064,107 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
     }
   }
   return fit(`${formatInt(ctxPct)}% ${stateLabel}`, width);
+}
+function hasTokenCounts(metrics) {
+  if (!metrics) return false;
+  return Number.isFinite(metrics.inputTokens) && metrics.inputTokens > 0 || Number.isFinite(metrics.outputTokens) && metrics.outputTokens > 0 || typeof metrics.cacheReadTokens === "number" && Number.isFinite(metrics.cacheReadTokens) && metrics.cacheReadTokens > 0;
+}
+function cacheHitPercent(inputTokens, cacheReadTokens) {
+  const totalIn = inputTokens + cacheReadTokens;
+  if (totalIn <= 0) return 0;
+  return clampInt(Math.trunc(cacheReadTokens / totalIn * 100 + 0.5));
+}
+function cacheHitColor(pct) {
+  if (pct >= 70) return colorGreen;
+  if (pct >= 30) return colorYellow;
+  return colorMuted;
+}
+function formatSpeed(tps) {
+  if (tps >= 10) {
+    return Math.round(tps).toString(10);
+  }
+  return tps.toFixed(1);
+}
+function formatDurationSec(seconds) {
+  return `${seconds.toFixed(1)}s`;
+}
+function renderTokenLine(metrics, config, width) {
+  if (!metrics || !config.showTokens && !config.showTokenSpeed) {
+    return "";
+  }
+  const showCounts = config.showTokens && hasTokenCounts(metrics);
+  const hasCache = showCounts && typeof metrics.cacheReadTokens === "number" && Number.isFinite(metrics.cacheReadTokens) && metrics.cacheReadTokens >= 0;
+  const inputTokens = showCounts ? Math.max(0, metrics.inputTokens) : 0;
+  const cacheRead = hasCache ? Math.max(0, metrics.cacheReadTokens) : 0;
+  const outputTokens = showCounts ? Math.max(0, metrics.outputTokens) : 0;
+  const totalIn = inputTokens + cacheRead;
+  let fullTok = "";
+  let mediumTok = "";
+  let compactTok = "";
+  if (showCounts) {
+    if (hasCache) {
+      const hitPct = cacheHitPercent(inputTokens, cacheRead);
+      const hitBadge = colorize(`(${formatInt(hitPct)}%)`, cacheHitColor(hitPct), config.color);
+      const hitCompactBadge = colorize(`(${formatInt(hitPct)}% hit)`, cacheHitColor(hitPct), config.color);
+      fullTok = `Tok ${formatTokens(inputTokens)} in \xB7 ${formatTokens(cacheRead)} hit ${hitBadge} \xB7 ${formatTokens(outputTokens)} out`;
+      mediumTok = `Tok ${formatTokens(inputTokens)} in ${hitCompactBadge} \xB7 ${formatTokens(outputTokens)} out`;
+      compactTok = `Tok ${formatTokens(totalIn)}/${formatTokens(outputTokens)}`;
+    } else {
+      fullTok = `Tok ${formatTokens(inputTokens)} in \xB7 ${formatTokens(outputTokens)} out`;
+      mediumTok = `Tok ${formatTokens(inputTokens)}/${formatTokens(outputTokens)}`;
+      compactTok = mediumTok;
+    }
+  }
+  let fullSpeed = "";
+  let compactSpeed = "";
+  const tps = metrics.tokensPerSecond;
+  if (config.showTokenSpeed && typeof tps === "number" && Number.isFinite(tps) && tps > 0) {
+    const rateRaw = `${metrics.speedEstimated ? "~" : ""}${formatSpeed(tps)} tok/s`;
+    compactSpeed = colorize(rateRaw, colorCyan, config.color);
+    const ttft = metrics.ttftSeconds;
+    if (typeof ttft === "number" && Number.isFinite(ttft) && ttft > 0) {
+      fullSpeed = `${compactSpeed} \xB7 ${colorize(`TTFT ${formatDurationSec(ttft)}`, colorMuted, config.color)}`;
+    } else {
+      fullSpeed = compactSpeed;
+    }
+  }
+  if (fullTok === "" && fullSpeed === "") {
+    return "";
+  }
+  const candidates = [
+    joinHeader(fullTok, fullSpeed),
+    joinHeader(fullTok, compactSpeed),
+    joinHeader(mediumTok, compactSpeed),
+    joinHeader(compactTok, compactSpeed),
+    compactTok !== "" ? compactTok : compactSpeed
+  ].filter((line) => line !== "");
+  for (const line of candidates) {
+    if (visibleLen(line) <= width) {
+      return line;
+    }
+  }
+  return fit(candidates[candidates.length - 1] ?? "", width);
+}
+function renderSingleLineTokenParts(metrics, config) {
+  if (!metrics) {
+    return { tokText: "", speedText: "" };
+  }
+  let tokText = "";
+  if (config.showTokens && hasTokenCounts(metrics)) {
+    const hasCache = typeof metrics.cacheReadTokens === "number" && Number.isFinite(metrics.cacheReadTokens) && metrics.cacheReadTokens >= 0;
+    const inputTokens = Math.max(0, metrics.inputTokens);
+    const cacheRead = hasCache ? Math.max(0, metrics.cacheReadTokens) : 0;
+    const outputTokens = Math.max(0, metrics.outputTokens);
+    const raw = hasCache ? `Tok ${formatTokens(inputTokens + cacheRead)}/${formatTokens(outputTokens)} (${formatInt(cacheHitPercent(inputTokens, cacheRead))}%)` : `Tok ${formatTokens(inputTokens)}/${formatTokens(outputTokens)}`;
+    tokText = colorize(raw, colorMuted, config.color);
+  }
+  let speedText = "";
+  const tps = metrics.tokensPerSecond;
+  if (config.showTokenSpeed && typeof tps === "number" && Number.isFinite(tps) && tps > 0) {
+    const raw = `${metrics.speedEstimated ? "~" : ""}${formatSpeed(tps)} tok/s`;
+    speedText = colorize(raw, colorCyan, config.color);
+  }
+  return { tokText, speedText };
 }
 function renderModelSegment(shortModel, rawPlan, config) {
   const trimmed = rawPlan.trim();
@@ -1512,6 +1627,634 @@ function title(raw) {
   return fields.join(" ");
 }
 
+// src/tokenMetrics.ts
+var import_node_fs6 = __toESM(require("node:fs"));
+var import_node_os2 = __toESM(require("node:os"));
+var import_node_path5 = __toESM(require("node:path"));
+var maxTranscriptReadBytes = 32 * 1024 * 1024;
+var minSampleOutputDelta = 5;
+var minSampleDurationSec = 0.2;
+var maxSampleDurationSec = 600;
+var minDbDecodeDurationSec = 0.25;
+var maxPlausibleTps = 5e3;
+var safeConversationIdPattern = /^[0-9A-Za-z_-]{1,128}$/;
+var cachedSqliteModule;
+function defaultLoadSqlite() {
+  if (cachedSqliteModule !== void 0) {
+    return cachedSqliteModule;
+  }
+  const origEmitWarning = process.emitWarning;
+  process.emitWarning = ((warning, ...rest) => {
+    const msg = typeof warning === "string" ? warning : warning?.message ?? "";
+    if (msg.includes("SQLite")) {
+      return;
+    }
+    return origEmitWarning.call(process, warning, ...rest);
+  });
+  try {
+    const moduleName = "node:sqlite";
+    const loaded = require(moduleName);
+    cachedSqliteModule = typeof loaded?.DatabaseSync === "function" ? loaded : null;
+  } catch {
+    cachedSqliteModule = null;
+  } finally {
+    process.emitWarning = origEmitWarning;
+  }
+  return cachedSqliteModule;
+}
+function resolveConversationDbPath(conversationId, transcriptPath, homedir = import_node_os2.default.homedir(), conversationsDir) {
+  const id = (conversationId ?? "").trim();
+  if (!safeConversationIdPattern.test(id)) {
+    return "";
+  }
+  if (conversationsDir) {
+    return import_node_path5.default.join(conversationsDir, `${id}.db`);
+  }
+  if (typeof transcriptPath === "string" && transcriptPath.trim() !== "") {
+    const derived = appDataDirFromTranscript(transcriptPath.trim(), id);
+    if (derived !== "") {
+      return import_node_path5.default.join(derived, "conversations", `${id}.db`);
+    }
+  }
+  if (!homedir) {
+    return "";
+  }
+  return import_node_path5.default.join(homedir, ".gemini", "antigravity-cli", "conversations", `${id}.db`);
+}
+function appDataDirFromTranscript(transcriptPath, conversationId) {
+  let current = import_node_path5.default.dirname(transcriptPath);
+  for (let depth = 0; depth < 8; depth += 1) {
+    const parent = import_node_path5.default.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    if (import_node_path5.default.basename(current) === conversationId && import_node_path5.default.basename(parent) === "brain") {
+      const appDir = import_node_path5.default.dirname(parent);
+      return appDir !== parent ? appDir : "";
+    }
+    current = parent;
+  }
+  return "";
+}
+function collectTokenMetrics(payload, opts) {
+  if (!payload) {
+    return null;
+  }
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const statePath = opts.statePath ?? "";
+  const state2 = loadPersistedState(statePath);
+  let dirty = false;
+  const persist = () => {
+    if (dirty && statePath !== "") {
+      savePersistedState(statePath, state2);
+    }
+  };
+  if (opts.source === "db") {
+    const res = collectFromDb(payload, state2, opts);
+    dirty = res.dirty;
+    persist();
+    return res.metrics;
+  }
+  if (opts.source === "auto") {
+    const dbRes = collectFromDb(payload, state2, opts);
+    dirty = dirty || dbRes.dirty;
+    if (dbRes.metrics !== null) {
+      persist();
+      return dbRes.metrics;
+    }
+  }
+  const transcriptRes = collectFromTranscript(payload, state2, now);
+  dirty = dirty || transcriptRes.dirty;
+  persist();
+  return transcriptRes.metrics;
+}
+function collectFromTranscript(payload, state2, now) {
+  let dirty = false;
+  const transcriptPath = typeof payload.transcript_path === "string" ? payload.transcript_path.trim() : "";
+  let inputTokens = 0;
+  let cacheReadTokens;
+  let cacheCreationTokens;
+  let outputTokens = 0;
+  let turns;
+  let hasData = false;
+  if (transcriptPath !== "") {
+    const updated = readTranscriptIncremental(transcriptPath, state2.transcript);
+    if (updated.dirty && updated.cursor) {
+      state2.transcript = updated.cursor;
+      dirty = true;
+    }
+    if (updated.cursor && updated.cursor.turns > 0) {
+      inputTokens = updated.cursor.inputTokens;
+      cacheReadTokens = updated.cursor.cacheReadTokens;
+      outputTokens = updated.cursor.outputTokens;
+      turns = updated.cursor.turns;
+      hasData = true;
+    }
+  }
+  if (!hasData) {
+    const fallback = readFromPayloadContext(payload.context_window);
+    if (fallback) {
+      inputTokens = fallback.inputTokens;
+      cacheReadTokens = fallback.cacheReadTokens;
+      cacheCreationTokens = fallback.cacheCreationTokens;
+      outputTokens = fallback.outputTokens;
+      hasData = true;
+    }
+  }
+  const isModelActive = isActiveModelState(payload.agent_state);
+  if (!hasData && !state2.sampler && !isModelActive) {
+    return { metrics: null, dirty };
+  }
+  const sampledOutputTokens = Math.max(outputTokens, finiteNonNeg(payload.context_window?.total_output_tokens) ?? 0);
+  const sampled = updateSpeedSampler(state2.sampler, payload, sampledOutputTokens, now);
+  if (sampled.dirty) {
+    state2.sampler = sampled.sampler;
+    dirty = true;
+  }
+  if (!hasData) {
+    return { metrics: null, dirty };
+  }
+  return {
+    dirty,
+    metrics: {
+      source: "transcript",
+      inputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      outputTokens,
+      tokensPerSecond: sampled.tokensPerSecond,
+      speedEstimated: sampled.tokensPerSecond !== void 0 ? true : void 0,
+      turns
+    }
+  };
+}
+function readTranscriptIncremental(transcriptPath, prev) {
+  const stat = statOrNull(transcriptPath);
+  if (!stat || !stat.isFile()) {
+    return { cursor: null, dirty: false };
+  }
+  if (prev && prev.path === transcriptPath && prev.size === stat.size && prev.mtimeMs === stat.mtimeMs) {
+    return { cursor: prev, dirty: false };
+  }
+  const reset = !prev || prev.path !== transcriptPath || stat.size < prev.byteOffset;
+  const cursor = reset ? {
+    path: transcriptPath,
+    byteOffset: 0,
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 0,
+    turns: 0,
+    lastStepIndex: -1
+  } : { ...prev, mtimeMs: stat.mtimeMs, size: stat.size };
+  const available = stat.size - cursor.byteOffset;
+  if (available <= 0) {
+    return { cursor, dirty: !prev || prev.mtimeMs !== stat.mtimeMs || prev.size !== stat.size };
+  }
+  const toRead = Math.min(available, maxTranscriptReadBytes);
+  const buffer = Buffer.allocUnsafe(toRead);
+  let bytesRead = 0;
+  let fd;
+  try {
+    fd = import_node_fs6.default.openSync(transcriptPath, "r");
+    bytesRead = import_node_fs6.default.readSync(fd, buffer, 0, toRead, cursor.byteOffset);
+  } catch {
+    return { cursor: prev && prev.path === transcriptPath ? prev : null, dirty: false };
+  } finally {
+    if (fd !== void 0) {
+      try {
+        import_node_fs6.default.closeSync(fd);
+      } catch {
+      }
+    }
+  }
+  if (bytesRead <= 0) {
+    return { cursor, dirty: false };
+  }
+  const slice = buffer.subarray(0, bytesRead);
+  const lastNewline = slice.lastIndexOf(10);
+  if (lastNewline < 0) {
+    return { cursor, dirty: false };
+  }
+  const completeText = slice.subarray(0, lastNewline + 1).toString("utf8");
+  cursor.byteOffset += lastNewline + 1;
+  for (const rawLine of completeText.split("\n")) {
+    if (!rawLine.includes('"PLANNER_RESPONSE"')) {
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+    if (parsed.type !== "PLANNER_RESPONSE") {
+      continue;
+    }
+    if (parsed.status !== void 0 && parsed.status !== "DONE") {
+      continue;
+    }
+    const stepIndex = typeof parsed.step_index === "number" && Number.isInteger(parsed.step_index) ? parsed.step_index : -1;
+    if (stepIndex >= 0 && stepIndex <= cursor.lastStepIndex) {
+      continue;
+    }
+    const inp = finiteNonNeg(parsed.input_tokens);
+    const cacheRead = finiteNonNeg(parsed.cache_read_tokens);
+    const out = finiteNonNeg(parsed.output_tokens);
+    if (inp === null && cacheRead === null && out === null) {
+      continue;
+    }
+    cursor.inputTokens += inp ?? 0;
+    cursor.cacheReadTokens += cacheRead ?? 0;
+    cursor.outputTokens += out ?? 0;
+    cursor.turns += 1;
+    if (stepIndex >= 0) {
+      cursor.lastStepIndex = stepIndex;
+    }
+  }
+  return { cursor, dirty: true };
+}
+function readFromPayloadContext(ctx) {
+  if (!ctx) {
+    return null;
+  }
+  const totalIn = finiteNonNeg(ctx.total_input_tokens);
+  const totalOut = finiteNonNeg(ctx.total_output_tokens);
+  const cu = isRecord2(ctx.current_usage) ? ctx.current_usage : null;
+  if (cu) {
+    const cuIn = finiteNonNeg(cu.input_tokens);
+    const cuOut = finiteNonNeg(cu.output_tokens);
+    const cuCacheRead = finiteNonNeg(cu.cache_read_input_tokens);
+    const cuCacheCreate = finiteNonNeg(cu.cache_creation_input_tokens);
+    const inputTokens = cuIn ?? totalIn ?? 0;
+    const outputTokens = Math.max(cuOut ?? 0, totalOut ?? 0);
+    if (inputTokens > 0 || outputTokens > 0 || (cuCacheRead ?? 0) > 0) {
+      return {
+        inputTokens,
+        cacheReadTokens: cuCacheRead ?? void 0,
+        cacheCreationTokens: cuCacheCreate ?? void 0,
+        outputTokens
+      };
+    }
+  }
+  if ((totalIn ?? 0) > 0 || (totalOut ?? 0) > 0) {
+    return {
+      inputTokens: totalIn ?? 0,
+      outputTokens: totalOut ?? 0
+    };
+  }
+  return null;
+}
+function isActiveModelState(raw) {
+  const agentState = (raw ?? "").trim().toLowerCase();
+  return agentState === "thinking" || agentState === "working";
+}
+function updateSpeedSampler(prev, payload, currentOutputTokens, now) {
+  const convId = (payload.conversation_id ?? "").trim();
+  const agentState = (payload.agent_state ?? "").trim().toLowerCase();
+  const isModelActive = isActiveModelState(agentState);
+  const nowMs = now.getTime();
+  const switched = prev !== void 0 && convId !== "" && prev.conversationId !== "" && prev.conversationId !== convId;
+  const next = !prev || switched ? {
+    conversationId: convId,
+    burstStartMs: isModelActive ? nowMs : void 0,
+    burstBaseOutputTokens: currentOutputTokens,
+    lastAgentState: agentState,
+    lastTokensPerSecond: void 0
+  } : { ...prev };
+  if (convId !== "") {
+    next.conversationId = convId;
+  }
+  if (next.burstBaseOutputTokens !== void 0 && currentOutputTokens < next.burstBaseOutputTokens) {
+    next.burstBaseOutputTokens = currentOutputTokens;
+    next.burstStartMs = isModelActive ? nowMs : void 0;
+  }
+  if (next.burstStartMs !== void 0) {
+    const deltaOut = currentOutputTokens - (next.burstBaseOutputTokens ?? 0);
+    const elapsedSec = (nowMs - next.burstStartMs) / 1e3;
+    if (deltaOut >= minSampleOutputDelta && elapsedSec >= minSampleDurationSec && elapsedSec <= maxSampleDurationSec) {
+      const tps = deltaOut / elapsedSec;
+      if (Number.isFinite(tps) && tps > 0 && tps <= maxPlausibleTps) {
+        next.lastTokensPerSecond = tps;
+      }
+    }
+    if (!isModelActive) {
+      next.burstStartMs = void 0;
+      next.burstBaseOutputTokens = currentOutputTokens;
+    }
+  } else if (isModelActive) {
+    next.burstStartMs = nowMs;
+    next.burstBaseOutputTokens = currentOutputTokens;
+  } else {
+    next.burstBaseOutputTokens = currentOutputTokens;
+  }
+  next.lastAgentState = agentState;
+  const dirty = !prev || JSON.stringify(prev) !== JSON.stringify(next);
+  return { sampler: next, tokensPerSecond: next.lastTokensPerSecond, dirty };
+}
+function collectFromDb(payload, state2, opts) {
+  const convId = (payload.conversation_id ?? "").trim();
+  const dbPath = resolveConversationDbPath(convId, payload.transcript_path, opts.homedir, opts.conversationsDir);
+  if (dbPath === "") {
+    return { metrics: null, dirty: false };
+  }
+  const dbStat = statOrNull(dbPath);
+  if (!dbStat || !dbStat.isFile()) {
+    return { metrics: null, dirty: false };
+  }
+  const walStat = statOrNull(`${dbPath}-wal`);
+  const fingerprint = `${dbPath}|${dbStat.mtimeMs}|${dbStat.size}|${walStat?.mtimeMs ?? 0}|${walStat?.size ?? 0}`;
+  if (state2.db && state2.db.fingerprint === fingerprint && state2.db.conversationId === convId) {
+    return { metrics: dbCursorToMetrics(state2.db), dirty: false };
+  }
+  const sqlite = (opts.loadSqlite ?? defaultLoadSqlite)();
+  if (!sqlite) {
+    return { metrics: null, dirty: false };
+  }
+  const canReuse = state2.db !== void 0 && state2.db.path === dbPath && state2.db.conversationId === convId && state2.db.lastIdx >= 0 && dbStat.size >= state2.db.dbSize;
+  const cursor = canReuse ? { ...state2.db, fingerprint, dbSize: dbStat.size } : {
+    conversationId: convId,
+    path: dbPath,
+    fingerprint,
+    dbSize: dbStat.size,
+    lastIdx: -1,
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 0,
+    thinkingTokens: 0,
+    turns: 0
+  };
+  let db;
+  try {
+    db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+    const rows = db.prepare("SELECT idx, data FROM gen_metadata WHERE idx > ? ORDER BY idx").all(cursor.lastIdx);
+    for (const rawRow of rows) {
+      if (!isRecord2(rawRow)) continue;
+      const idx = typeof rawRow.idx === "number" && Number.isInteger(rawRow.idx) ? rawRow.idx : -1;
+      const data = asUint8Array(rawRow.data);
+      if (idx < 0 || !data) continue;
+      if (idx > cursor.lastIdx) {
+        cursor.lastIdx = idx;
+      }
+      const decoded = decodeGenMetadata(data);
+      if (!decoded) continue;
+      cursor.inputTokens += decoded.inputTokens;
+      cursor.cacheReadTokens += decoded.cacheReadTokens;
+      cursor.outputTokens += decoded.outputTokens;
+      cursor.thinkingTokens += decoded.thinkingTokens ?? 0;
+      cursor.turns += 1;
+      const speed = computeDbSpeed(decoded);
+      if (speed !== void 0) {
+        cursor.lastTokensPerSecond = speed;
+      }
+      if (decoded.ttftSeconds !== void 0 && decoded.ttftSeconds >= 0 && decoded.ttftSeconds <= 600) {
+        cursor.lastTtftSeconds = decoded.ttftSeconds;
+      }
+    }
+  } catch {
+    return { metrics: null, dirty: false };
+  } finally {
+    if (db) {
+      try {
+        db.close();
+      } catch {
+      }
+    }
+  }
+  state2.db = cursor;
+  return { metrics: dbCursorToMetrics(cursor), dirty: true };
+}
+function dbCursorToMetrics(cursor) {
+  if (cursor.turns <= 0) {
+    return null;
+  }
+  return {
+    source: "db",
+    inputTokens: cursor.inputTokens,
+    cacheReadTokens: cursor.cacheReadTokens,
+    outputTokens: cursor.outputTokens,
+    thinkingTokens: cursor.thinkingTokens > 0 ? cursor.thinkingTokens : void 0,
+    tokensPerSecond: cursor.lastTokensPerSecond,
+    speedEstimated: cursor.lastTokensPerSecond !== void 0 ? false : void 0,
+    ttftSeconds: cursor.lastTtftSeconds,
+    turns: cursor.turns
+  };
+}
+function computeDbSpeed(row) {
+  if (row.outputTokens <= 0) {
+    return void 0;
+  }
+  const gen = row.genDurationSeconds ?? 0;
+  const ttft = row.ttftSeconds ?? 0;
+  let duration = 0;
+  if (gen >= minDbDecodeDurationSec) {
+    duration = gen;
+  } else if (ttft + gen >= minDbDecodeDurationSec) {
+    duration = ttft + gen;
+  } else {
+    return void 0;
+  }
+  const tps = row.outputTokens / duration;
+  if (!Number.isFinite(tps) || tps <= 0 || tps > maxPlausibleTps) {
+    return void 0;
+  }
+  return tps;
+}
+function decodeGenMetadata(bytes) {
+  if (bytes.length === 0) {
+    return null;
+  }
+  let inner = null;
+  const rootOk = scanProto(bytes, (fieldNumber, wireType, varintVal, slice) => {
+    if (fieldNumber === 1 && wireType === 2 && slice) {
+      inner = slice;
+    }
+  });
+  if (!rootOk || !inner) {
+    return null;
+  }
+  let usageSlice = null;
+  let ttftSlice = null;
+  let genSlice = null;
+  const innerOk = scanProto(inner, (fieldNumber, wireType, _varintVal, slice) => {
+    if (wireType !== 2 || !slice) return;
+    if (fieldNumber === 4) usageSlice = slice;
+    else if (fieldNumber === 11) ttftSlice = slice;
+    else if (fieldNumber === 12) genSlice = slice;
+  });
+  if (!innerOk || !usageSlice) {
+    return null;
+  }
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let thinkingTokens;
+  let responseTokens;
+  const usageOk = scanProto(usageSlice, (fieldNumber, wireType, varintVal) => {
+    if (wireType !== 0 || varintVal === void 0) return;
+    const n = safeNonNegBigInt(varintVal);
+    if (n === null) return;
+    if (fieldNumber === 2) inputTokens = n;
+    else if (fieldNumber === 3) outputTokens = n;
+    else if (fieldNumber === 5) cacheReadTokens = n;
+    else if (fieldNumber === 9) thinkingTokens = n;
+    else if (fieldNumber === 10) responseTokens = n;
+  });
+  if (!usageOk) {
+    return null;
+  }
+  const ttftSeconds = ttftSlice ? decodeProtoDuration(ttftSlice) : void 0;
+  const genDurationSeconds = genSlice ? decodeProtoDuration(genSlice) : void 0;
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    thinkingTokens,
+    responseTokens,
+    ttftSeconds,
+    genDurationSeconds
+  };
+}
+function decodeProtoDuration(bytes) {
+  let seconds = 0;
+  let nanos = 0;
+  const ok = scanProto(bytes, (fieldNumber, wireType, varintVal) => {
+    if (wireType !== 0 || varintVal === void 0) return;
+    const n = safeNonNegBigInt(varintVal);
+    if (n === null) return;
+    if (fieldNumber === 1) seconds = n;
+    else if (fieldNumber === 2) nanos = n;
+  });
+  if (!ok || nanos >= 1e9) {
+    return void 0;
+  }
+  return seconds + nanos / 1e9;
+}
+function scanProto(bytes, onField) {
+  let offset = 0;
+  const len = bytes.length;
+  while (offset < len) {
+    const keyRes = readVarint(bytes, offset);
+    if (!keyRes) return false;
+    offset = keyRes.nextOffset;
+    const fieldNumber = Number(keyRes.value >> 3n);
+    const wireType = Number(keyRes.value & 7n);
+    if (fieldNumber <= 0 || !Number.isSafeInteger(fieldNumber)) return false;
+    if (wireType === 0) {
+      const valRes = readVarint(bytes, offset);
+      if (!valRes) return false;
+      offset = valRes.nextOffset;
+      onField(fieldNumber, 0, valRes.value);
+    } else if (wireType === 1) {
+      if (offset + 8 > len) return false;
+      offset += 8;
+    } else if (wireType === 2) {
+      const lenRes = readVarint(bytes, offset);
+      if (!lenRes) return false;
+      const chunkLen = safeNonNegBigInt(lenRes.value);
+      if (chunkLen === null) return false;
+      offset = lenRes.nextOffset;
+      if (offset + chunkLen > len) return false;
+      onField(fieldNumber, 2, void 0, bytes.subarray(offset, offset + chunkLen));
+      offset += chunkLen;
+    } else if (wireType === 5) {
+      if (offset + 4 > len) return false;
+      offset += 4;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+function readVarint(bytes, start) {
+  let value = 0n;
+  let shift = 0n;
+  let offset = start;
+  while (offset < bytes.length) {
+    const b = bytes[offset];
+    offset += 1;
+    value |= BigInt(b & 127) << shift;
+    if ((b & 128) === 0) {
+      return { value, nextOffset: offset };
+    }
+    shift += 7n;
+    if (shift > 63n) {
+      return null;
+    }
+  }
+  return null;
+}
+function safeNonNegBigInt(value) {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return null;
+  }
+  return Number(value);
+}
+function loadPersistedState(statePath) {
+  if (statePath === "") {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(import_node_fs6.default.readFileSync(statePath, "utf8"));
+    if (!isRecord2(parsed)) {
+      return {};
+    }
+    const out = {};
+    if (isValidTranscriptCursor(parsed.transcript)) {
+      out.transcript = parsed.transcript;
+    }
+    if (isValidSamplerState(parsed.sampler)) {
+      out.sampler = parsed.sampler;
+    }
+    if (isValidDbCursor(parsed.db)) {
+      out.db = parsed.db;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+function isValidTranscriptCursor(value) {
+  if (!isRecord2(value)) return false;
+  return typeof value.path === "string" && finiteNonNeg(value.byteOffset) !== null && typeof value.mtimeMs === "number" && Number.isFinite(value.mtimeMs) && finiteNonNeg(value.size) !== null && finiteNonNeg(value.inputTokens) !== null && finiteNonNeg(value.cacheReadTokens) !== null && finiteNonNeg(value.outputTokens) !== null && finiteNonNeg(value.turns) !== null && typeof value.lastStepIndex === "number" && Number.isInteger(value.lastStepIndex);
+}
+function isValidSamplerState(value) {
+  if (!isRecord2(value)) return false;
+  return typeof value.conversationId === "string" && (value.burstStartMs === void 0 || typeof value.burstStartMs === "number" && Number.isFinite(value.burstStartMs)) && (value.burstBaseOutputTokens === void 0 || finiteNonNeg(value.burstBaseOutputTokens) !== null) && (value.lastAgentState === void 0 || typeof value.lastAgentState === "string") && (value.lastTokensPerSecond === void 0 || typeof value.lastTokensPerSecond === "number" && Number.isFinite(value.lastTokensPerSecond) && value.lastTokensPerSecond > 0);
+}
+function isValidDbCursor(value) {
+  if (!isRecord2(value)) return false;
+  return typeof value.conversationId === "string" && typeof value.path === "string" && typeof value.fingerprint === "string" && finiteNonNeg(value.dbSize) !== null && typeof value.lastIdx === "number" && Number.isInteger(value.lastIdx) && finiteNonNeg(value.inputTokens) !== null && finiteNonNeg(value.cacheReadTokens) !== null && finiteNonNeg(value.outputTokens) !== null && finiteNonNeg(value.thinkingTokens) !== null && finiteNonNeg(value.turns) !== null && (value.lastTokensPerSecond === void 0 || typeof value.lastTokensPerSecond === "number" && Number.isFinite(value.lastTokensPerSecond) && value.lastTokensPerSecond > 0) && (value.lastTtftSeconds === void 0 || finiteNonNeg(value.lastTtftSeconds) !== null);
+}
+function savePersistedState(statePath, state2) {
+  try {
+    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(statePath), { recursive: true, mode: 448 });
+    import_node_fs6.default.writeFileSync(statePath, `${JSON.stringify(state2)}
+`, { encoding: "utf8", mode: 384 });
+    import_node_fs6.default.chmodSync(statePath, 384);
+  } catch {
+  }
+}
+function statOrNull(filePath) {
+  try {
+    return import_node_fs6.default.statSync(filePath);
+  } catch {
+    return null;
+  }
+}
+function finiteNonNeg(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function asUint8Array(value) {
+  if (value instanceof Uint8Array) return value;
+  if (Buffer.isBuffer(value)) return value;
+  return null;
+}
+
 // src/doctor.ts
 var iconProbe = [
   { glyph: "\uEE9C", label: "model" },
@@ -1879,7 +2622,7 @@ var sameFrameRefreshBudgetMs = 2e3;
 var stdinTimeoutMs = 1e3;
 var consumedQuotaRefreshMs = 15 * 1e3;
 var untouchedQuotaRefreshMs = 30 * 1e3;
-function renderStatusline(input, cfg = defaultConfig(), cache = null) {
+function renderStatusline(input, cfg = defaultConfig(), cache = null, tokenMetrics = null) {
   if (input.trim() === "") {
     return "agy-hud";
   }
@@ -1906,6 +2649,7 @@ function renderStatusline(input, cfg = defaultConfig(), cache = null) {
     return render(payload, {
       config: cfg,
       quota: cache,
+      tokenMetrics,
       gitBranch: branch2
     });
   } catch {
@@ -1921,26 +2665,26 @@ function configPaths() {
   paths.push(...pluginConfigPaths());
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
-    paths.push(import_node_path5.default.join(xdg, "agy-hud", "config.json"));
+    paths.push(import_node_path6.default.join(xdg, "agy-hud", "config.json"));
   }
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (home) {
-    paths.push(import_node_path5.default.join(home, ".config", "agy-hud", "config.json"));
+    paths.push(import_node_path6.default.join(home, ".config", "agy-hud", "config.json"));
   }
   return paths;
 }
 function pluginConfigPaths() {
-  const dir = import_node_path5.default.dirname(__filename);
-  return [import_node_path5.default.join(dir, "config.json"), import_node_path5.default.join(dir, "..", "config.json")];
+  const dir = import_node_path6.default.dirname(__filename);
+  return [import_node_path6.default.join(dir, "config.json"), import_node_path6.default.join(dir, "..", "config.json")];
 }
 function userConfigPath() {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
-    return import_node_path5.default.join(xdg, "agy-hud", "config.json");
+    return import_node_path6.default.join(xdg, "agy-hud", "config.json");
   }
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (home) {
-    return import_node_path5.default.join(home, ".config", "agy-hud", "config.json");
+    return import_node_path6.default.join(home, ".config", "agy-hud", "config.json");
   }
   return "";
 }
@@ -1950,21 +2694,21 @@ function quotaCacheWritePath() {
     return explicit;
   }
   const xdg = process.env.XDG_CACHE_HOME;
-  if (xdg && import_node_path5.default.isAbsolute(xdg)) {
-    return import_node_path5.default.join(xdg, "agy-hud", "quota_cache.json");
+  if (xdg && import_node_path6.default.isAbsolute(xdg)) {
+    return import_node_path6.default.join(xdg, "agy-hud", "quota_cache.json");
   }
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (!home) {
     return "";
   }
-  return import_node_path5.default.join(home, ".cache", "agy-hud", "quota_cache.json");
+  return import_node_path6.default.join(home, ".cache", "agy-hud", "quota_cache.json");
 }
 function legacyQuotaCachePath() {
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (!home) {
     return "";
   }
-  return import_node_path5.default.join(home, ".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
+  return import_node_path6.default.join(home, ".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
 }
 function quotaCacheReadCandidates() {
   if (process.env.AGY_HUD_QUOTA_CACHE) {
@@ -1981,7 +2725,7 @@ function loadQuotaFromCandidates(candidates) {
     if (ok) {
       return [cache, true, primaryUnloadable];
     }
-    if (index === 0 && import_node_fs6.default.existsSync(candidate)) {
+    if (index === 0 && import_node_fs7.default.existsSync(candidate)) {
       primaryUnloadable = true;
     }
   }
@@ -2009,7 +2753,7 @@ function shouldUseProcessCWD(payloadCWD) {
   if (payloadCWD.trim() === "") {
     return true;
   }
-  return import_node_path5.default.basename(process.cwd()) === import_node_path5.default.basename(payloadCWD);
+  return import_node_path6.default.basename(process.cwd()) === import_node_path6.default.basename(payloadCWD);
 }
 function validGitCandidatePath(candidate) {
   const trimmed = candidate.trim();
@@ -2017,7 +2761,7 @@ function validGitCandidatePath(candidate) {
     return false;
   }
   try {
-    return import_node_fs6.default.statSync(trimmed).isDirectory();
+    return import_node_fs7.default.statSync(trimmed).isDirectory();
   } catch {
     return false;
   }
@@ -2053,7 +2797,7 @@ function fcList() {
 function agyPluginList() {
   try {
     return (0, import_node_child_process3.execFileSync)("agy", ["plugin", "list", "--json"], {
-      cwd: import_node_os2.default.tmpdir(),
+      cwd: import_node_os3.default.tmpdir(),
       windowsHide: true,
       encoding: "utf8",
       timeout: 5e3,
@@ -2070,20 +2814,20 @@ function doctorDepsFromEnv() {
     nodeVersion: process.version,
     platform: process.platform,
     env: process.env,
-    homedir: import_node_os2.default.homedir(),
+    homedir: import_node_os3.default.homedir(),
     configPaths: configPaths(),
     userConfigPath: userConfigPath(),
     pluginConfigPaths: pluginConfigPaths(),
     readFile: (filePath) => {
       try {
-        return import_node_fs6.default.readFileSync(filePath, "utf8");
+        return import_node_fs7.default.readFileSync(filePath, "utf8");
       } catch {
         return null;
       }
     },
     listDir: (dirPath) => {
       try {
-        return import_node_fs6.default.readdirSync(dirPath);
+        return import_node_fs7.default.readdirSync(dirPath);
       } catch {
         return [];
       }
@@ -2127,7 +2871,15 @@ async function runCli(args, deps = {}) {
       deps.sameFrameRefreshBudgetMs ?? sameFrameRefreshBudgetMs
     );
     triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed, cliVersion, probeRejected);
-    stdout(`${renderStatusline(raw, cfg, displayCache)}
+    const tokenMetrics = cfg.showTokens || cfg.showTokenSpeed ? collectTokenMetrics(payload, {
+      source: cfg.tokenMetricsSource,
+      statePath: cachePath !== "" ? `${cachePath}.tokens.json` : "",
+      homedir: deps.tokenMetricsHomedir,
+      conversationsDir: deps.tokenMetricsConversationsDir,
+      loadSqlite: deps.loadSqlite,
+      now: deps.now
+    }) : null;
+    stdout(`${renderStatusline(raw, cfg, displayCache, tokenMetrics)}
 `);
     return 0;
   }
@@ -2169,8 +2921,8 @@ async function runCli(args, deps = {}) {
         return 2;
       } finally {
         try {
-          if (flags.lockToken !== "" && import_node_fs6.default.readFileSync(lockPath, "utf8") === flags.lockToken) {
-            import_node_fs6.default.unlinkSync(lockPath);
+          if (flags.lockToken !== "" && import_node_fs7.default.readFileSync(lockPath, "utf8") === flags.lockToken) {
+            import_node_fs7.default.unlinkSync(lockPath);
           }
         } catch {
         }
@@ -2315,14 +3067,14 @@ function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repa
     return;
   }
   try {
-    if (import_node_fs6.default.existsSync(lockPath)) {
-      const stat = import_node_fs6.default.statSync(lockPath);
+    if (import_node_fs7.default.existsSync(lockPath)) {
+      const stat = import_node_fs7.default.statSync(lockPath);
       const minLockMs = activityRefresh ? 5 * 1e3 : 30 * 1e3;
       if (now.getTime() - stat.mtimeMs < minLockMs) {
         return;
       }
     }
-    import_node_fs6.default.writeFileSync(lockPath, lockToken, { encoding: "utf8", mode: 384 });
+    import_node_fs7.default.writeFileSync(lockPath, lockToken, { encoding: "utf8", mode: 384 });
     spawnQuotaRefresh(cliVersion, lockToken);
   } catch {
   }
@@ -2369,7 +3121,7 @@ function refreshFlags(args) {
 function usageSkipReason(cachePath, lockPath, lockToken, now) {
   let owner = "";
   try {
-    owner = import_node_fs6.default.readFileSync(lockPath, "utf8");
+    owner = import_node_fs7.default.readFileSync(lockPath, "utf8");
   } catch {
   }
   if (lockToken === "" || owner !== lockToken) {
@@ -2401,25 +3153,25 @@ function usageRefreshDue(cache, payload, prevState, marker, now) {
 }
 function takeUsageLock(lockPath, token, now) {
   try {
-    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(lockPath), { recursive: true, mode: 448 });
+    import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(lockPath), { recursive: true, mode: 448 });
   } catch {
     return false;
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      import_node_fs6.default.writeFileSync(lockPath, token, { encoding: "utf8", flag: "wx", mode: 384 });
+      import_node_fs7.default.writeFileSync(lockPath, token, { encoding: "utf8", flag: "wx", mode: 384 });
       return true;
     } catch (error) {
       if (error.code !== "EEXIST") {
         return false;
       }
       try {
-        if (now.getTime() - import_node_fs6.default.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
+        if (now.getTime() - import_node_fs7.default.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
           return false;
         }
         const aside = `${lockPath}.stale-${token}`;
-        import_node_fs6.default.renameSync(lockPath, aside);
-        import_node_fs6.default.rmSync(aside, { force: true });
+        import_node_fs7.default.renameSync(lockPath, aside);
+        import_node_fs7.default.rmSync(aside, { force: true });
       } catch (takeoverError) {
         if (takeoverError.code !== "ENOENT") {
           return false;
@@ -2431,11 +3183,11 @@ function takeUsageLock(lockPath, token, now) {
 }
 function saveUsageCache(cachePath, quota, timestamp = /* @__PURE__ */ new Date()) {
   try {
-    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(cachePath), { recursive: true, mode: 448 });
+    import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(cachePath), { recursive: true, mode: 448 });
     const cache = { timestamp: timestamp.toISOString(), source: "usage", models: {}, quota };
-    import_node_fs6.default.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}
+    import_node_fs7.default.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}
 `, { encoding: "utf8", mode: 384 });
-    import_node_fs6.default.chmodSync(cachePath, 384);
+    import_node_fs7.default.chmodSync(cachePath, 384);
   } catch (error) {
     return { ok: false, message: `Could not write the quota cache: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -2479,7 +3231,7 @@ function readRejectionMarker(cachePath) {
     return null;
   }
   try {
-    const marker = JSON.parse(import_node_fs6.default.readFileSync(markerPath, "utf8"));
+    const marker = JSON.parse(import_node_fs7.default.readFileSync(markerPath, "utf8"));
     if (typeof marker.cliVersion !== "string") {
       return null;
     }
@@ -2495,8 +3247,8 @@ function readRejectionMarker(cachePath) {
 }
 function writeRejectionMarker(cachePath, marker) {
   const markerPath = authRejectedPath(cachePath);
-  import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(markerPath), { recursive: true, mode: 448 });
-  import_node_fs6.default.writeFileSync(markerPath, `${JSON.stringify(marker)}
+  import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(markerPath), { recursive: true, mode: 448 });
+  import_node_fs7.default.writeFileSync(markerPath, `${JSON.stringify(marker)}
 `, { encoding: "utf8", mode: 384 });
 }
 function authRejectedFor(cachePath, cliVersion) {
@@ -2508,7 +3260,7 @@ function recordAuthRejection(cachePath, result, cliVersion) {
   }
   try {
     if (result.ok) {
-      import_node_fs6.default.rmSync(authRejectedPath(cachePath), { force: true });
+      import_node_fs7.default.rmSync(authRejectedPath(cachePath), { force: true });
     } else if (result.authRejected && cliVersion !== "" && !authRejectedFor(cachePath, cliVersion)) {
       writeRejectionMarker(cachePath, { cliVersion, rejectedAt: (/* @__PURE__ */ new Date()).toISOString() });
     }
@@ -2543,7 +3295,7 @@ function loadRefreshStateWithFallback(candidates) {
     if (statePath === "") {
       continue;
     }
-    if (import_node_fs6.default.existsSync(statePath)) {
+    if (import_node_fs7.default.existsSync(statePath)) {
       return loadStatuslineRefreshState(statePath);
     }
   }
@@ -2554,7 +3306,7 @@ function loadStatuslineRefreshState(statePath) {
     return null;
   }
   try {
-    const raw = import_node_fs6.default.readFileSync(statePath, "utf8");
+    const raw = import_node_fs7.default.readFileSync(statePath, "utf8");
     const parsed = JSON.parse(raw);
     return {
       conversationId: typeof parsed.conversationId === "string" ? parsed.conversationId : "",
@@ -2570,8 +3322,8 @@ function saveStatuslineRefreshState(statePath, state2) {
     return;
   }
   try {
-    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(statePath), { recursive: true, mode: 448 });
-    import_node_fs6.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
+    import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(statePath), { recursive: true, mode: 448 });
+    import_node_fs7.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
 `, { encoding: "utf8", mode: 384 });
   } catch {
   }

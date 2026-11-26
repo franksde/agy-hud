@@ -11,6 +11,9 @@
   "show_title": false,
   "show_mode": true,
   "show_icons": true,
+  "show_tokens": true,
+  "show_token_speed": true,
+  "token_metrics_source": "transcript",
   "context_value": "percent",
   "usage_value": "remaining"
 }
