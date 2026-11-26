@@ -55,12 +55,41 @@ If the live CLI still shows old output, first check that this installed bundle w
 
 ## HUD Behavior Notes
 
-- `statusline` must stay fast. It should only read stdin, local config, local cache, and cheap local git metadata.
+- `statusline` must stay fast. It should only read stdin, local config, local cache, and cheap local git metadata. The one exception is the optional token line; see [Token Metrics](#token-metrics).
 - Quota probing must contact only Antigravity loopback services, or run the official `agy -p /usage` where loopback is refused (see below), and must write sanitized cache data. agy-hud itself never opens a network connection.
 - The quota cache path defaults to `$XDG_CACHE_HOME/agy-hud/quota_cache.json`, falling back to `$HOME/.cache/agy-hud/quota_cache.json`. Writes always go there. Reads fall back to the pre-0.1.8 path under `$HOME/.gemini/antigravity-cli/scratch/agy-hud/` when no new cache exists yet, so upgrades are seamless.
 - Quota reset comes from the local API `quotaInfo.resetTime`. Display it as an absolute local clock time, not as a live countdown, because a status-line hook cannot update already-rendered text without a redraw.
 - The quota bar is a continuous progress bar derived from the exact quota fraction, 8 cells for a single window and 10 per window when both are shown (`usageBar` in `src/statusline.ts`). It is not five discrete 20% cells; an earlier revision of this file said otherwise, and that never matched the code, the tests, or the READMEs.
 - The context bar is likewise continuous, based on a precise context percentage.
+
+## Token Metrics
+
+`show_tokens` / `show_token_speed` (both off by default) read the current conversation's SQLite
+database, `~/.gemini/antigravity-cli/conversations/<conversation_id>.db`, table `gen_metadata`
+(`src/tokenMetrics.ts`). Rules that are easy to undo by accident:
+
+- **Stateless and read-only.** One read-only open per redraw, all rows summed, nothing written to
+  disk. The largest of 565 local databases had 287 rows and read in about 1.4 ms, which is why
+  the earlier transcript cursor and state file were removed. Do not bring back a token state file.
+- **Keep the Node version gate (`sqliteSupported`).** Node 22.5–22.11 with
+  `--experimental-sqlite` ignores `readOnly`; a review measured one HUD read checkpointing and
+  removing a live database's WAL. Only 22.13+ / 23.4+ / 24+ may load `node:sqlite`.
+- **Open only when `-wal` and `-shm` already exist.** A read-only open of a WAL database creates
+  missing sidecars and leaves them behind. Do not switch to `immutable=1` either: it ignores the
+  WAL, so the live conversation's latest rows go missing.
+- **The protobuf mapping is reverse-engineered** (f1 → f4: f2 input, f3 output, f5 cache read;
+  f11 TTFT, f12 generation duration). Before changing it, check per-conversation totals against
+  the `PLANNER_RESPONSE` lines of
+  `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl` on real data;
+  on CLI 1.5.17 they matched exactly.
+- **Speed divides by TTFT + generation time.** Thinking happens before the first token (TTFT grew
+  about 0.0084 s per thinking token across 249 responses), so output ÷ generation alone overstates
+  speed. Show speed only when both durations are valid.
+- **Locate the database by `conversation_id`, not `transcript_path`.** CLI 1.5.17 on macOS reports
+  a `transcript_path` under `~/.gemini/antigravity/`, which does not exist.
+- Tests that call `runCli statusline` must point `process.argv[0]` at a no-op script, as
+  `test/main.test.ts` does: otherwise a background quota refresh starts a real `quota refresh`
+  against the user's running agy and writes into the test's temp directory after cleanup.
 
 ## Font Detection Is A Hint, Not A Test
 

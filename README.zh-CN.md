@@ -11,7 +11,7 @@
 ## 运行要求
 
 - Antigravity CLI 1.1.0 或更高版本。安装、状态栏接入、渲染和 `/usage` 回退已验证至 1.5.15;loopback 配额探测已验证至 1.1.26,从 1.2.2 起被拒,此时配额刷新改为在后台执行官方的 `agy -p /usage`(见[配额缓存](#配额缓存))。状态栏通过 CLI 原生的 `/statusline` 命令接入,0.1.8 依赖它:旧版 `plugin.json` 声明的 `components` hook 在 1.1.x 下已不被识别,因此已被移除。如果你的 CLI 是尚无 `/statusline` 的 1.0.x,则无法激活这个版本——请留在 0.1.7,或升级 CLI。
-- Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))
+- Node.js 18+。CLI 启动状态栏时的 `PATH` 里不必有 `node`:`hooks/status-line.sh` 还会到 nvm、fnm、Volta、mise、asdf、nodenv、n 和 Homebrew 的安装位置查找(见[找不到 Node](#找不到-node))。可选的 token 行(`show_tokens`、`show_token_speed`)还需要 Node 22.13+ 或 23.4+,因为要用内置的 `node:sqlite` 读取数据;Node 更旧时只是不显示这一行,HUD 其余部分不受影响。
 - macOS、Linux 或 Windows。macOS/Linux 下使用 `hooks/status-line.sh`，Windows 下提供 `hooks/status-line.cmd`,且 CLI 必须是通过 `cmd.exe` 运行状态栏的版本,大概是 1.1.2 或更新(见[从 GitHub Release 安装](#从-github-release-安装))。
 - 如果你想要图标,需要一个带 Nerd Font 字形的终端字体。没有的话,HUD 里那四个图标会显示成方块或 `[?]`——看起来像插件坏了,其实不是,详见[图标显示成方块](#图标显示成方块)。设置 `"show_icons": false` 可以得到完全不依赖字体的纯文本 HUD。
 
@@ -259,7 +259,7 @@ agy plugin uninstall agy-hud
 
    **除非用户主动要求,否则不要替他装字体。** 那是系统级改动,而且它本身什么都修不好:终端仍然按自己 profile 里写的字族来画,而那个设置无法可靠地脚本化。在 SSH 场景下更是有害无益——字形由他本地机器上的终端绘制,在远端主机装字体不可能改变任何东西。如果他确实想要图标,把[图标显示成方块](#图标显示成方块)里的两步告诉他,第二步交给他自己做。
 
-4. 询问用户是否需要调整 `multiline`、`context_value` 或 `usage_value`(见[配置](#配置))。然后下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压,执行 `agy plugin install <解压目录>`。传入的必须是解压出来的归档目录,绝不能是 git clone 的仓库目录(原因见[从本地路径安装](#从本地路径安装))。如果失败,把错误展示给用户,不要静默重试。
+4. 询问用户是否需要调整 `multiline`、`context_value` 或 `usage_value`,以及是否要打开 token 行(`show_tokens`、`show_token_speed`;默认关闭,需要 Node 22.13+ 或 23.4+)(见[配置](#配置))。然后下载 `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz` 并解压,执行 `agy plugin install <解压目录>`。传入的必须是解压出来的归档目录,绝不能是 git clone 的仓库目录(原因见[从本地路径安装](#从本地路径安装))。如果失败,把错误展示给用户,不要静默重试。
 
 5. 用 `node <插件根目录>/dist/agy-hud.js doctor --json` 校验安装结果,它以机器可读的 JSON 汇报:
 
@@ -291,6 +291,7 @@ agy plugin uninstall agy-hud
    按下面的方式处理:
 
    - `nodeOk: false` —— 运行时低于 18。如实汇报,HUD 跑不起来。
+   - `nodeVersion` —— 如果用户打开了 `show_tokens` 或 `show_token_speed`,token 行需要 22.13+ 或 23.4+。版本更低时告诉用户这一行不会出现,HUD 其余部分照常。会话出现第一次模型回复之前,这一行也不会显示。
    - `nodeOk` 描述的是运行 `doctor` 的那个 Node,也就是你 shell 的 `PATH` 上的那个。CLI 启动状态栏时的 `PATH` 可能更短。如果 `doctor` 通过而 HUD 仍不出现,请运行[找不到 Node](#找不到-node)里的检查命令。
    - `statuslineWired: false` —— CLI 并没有在跑这个插件。如果 `statuslineEnabled` 为 `false`(例如执行过 `/statusline off`,它会在保留 `command` 的同时写入 `statusLine.enabled: false`),请让用户在 CLI 里运行 `/statusline enable` 恢复。否则请用户运行 `/statusline <插件根目录>/hooks/status-line.sh`(`platform` 为 `win32` 时用 `\hooks\status-line.cmd`),在此之前 HUD 不会出现。如果 `statuslineCommand` 有值且处于启用状态却没接到 agy-hud,说明状态栏归别的程序管,请说明它是什么,而不要直接覆盖。
    - `showIcons` —— 确认第 3 步最终落在了哪种模式。
@@ -354,9 +355,8 @@ node <插件根目录>/dist/agy-hud.js doctor --json
   "show_title": false,
   "show_mode": true,
   "show_icons": true,
-  "show_tokens": true,
-  "show_token_speed": true,
-  "token_metrics_source": "transcript",
+  "show_tokens": false,
+  "show_token_speed": false,
   "context_value": "percent",
   "usage_value": "remaining"
 }
@@ -372,12 +372,10 @@ node <插件根目录>/dist/agy-hud.js doctor --json
 - `show_mode`:在模型段末尾、目录之前显示用 `Shift+Tab` 切换的 agent 模式(Antigravity CLI 1.3.5+):`Plan`、`Accept Edits` 或 `Auto`,分别为青色、黄色、橙色。`default` 模式(`cycle_mode` 缺失或为 `"default"`)不显示;注意自 Antigravity CLI 1.5.7 起,支持 Auto 模式的账号默认即以 `auto` 模式启动,因此新会话启动时就会显示 `Auto`,切到 `default` 模式才会隐藏。默认情况下自定义状态栏会替换 CLI 的内置状态栏,而开始打字后,内置状态栏是唯一还显示模式的地方(在 `settings.json` 的 `statusLine` 里设置 `"stack_with_default": true` 可以叠加显示在内置状态栏下方;`/statusline off` 会写入 `"enabled": false` 暂停自定义状态栏,运行 `/statusline enable` 恢复)。默认开启。
 - `show_title`:显示 Antigravity CLI 1.1.27+ 提供的会话标题 `conversation_title`,位于分支与 agent 状态之间(单行模式在状态之前)。默认关闭。标题会被整理成单行纯文本、去掉控制字符,最多占 24 列;一行放不下时它最先被省略,早于费用。
 - `show_icons`:显示 Nerd Font 图标。如果你的终端字体把图标渲染成方框,设为 `false` 可回退到纯文本。跑 `doctor` 可以看到图标探针和确切的修复方式;完整说明见[图标显示成方块](#图标显示成方块)。
-- `show_tokens`:在多行模式下新增紧凑的第 3 行(单行模式空间充足时内联展示)显示当前会话累计 token 消耗与缓存命中率,例如 `Tok 142k in · 720k hit (84%) · 19k out`。尚无消耗数据时自动省略。默认开启。
-- `show_token_speed`:与 token 消耗并排显示模型输出速度(`tok/s`,使用 `"db"` 数据源时还会附带首字延迟 `TTFT`)。来自状态栏重绘采样的估算速率带 `~` 前缀。默认开启。
-- `token_metrics_source`:选择 token 消耗与速度的采集方案:
-  - `"transcript"`(默认,推荐):基于官方 stdin `context_window` 字段并按字节偏移增量读取 `payload.transcript_path`(`transcript.jsonl`),累计未缓存输入、缓存命中与输出 token,同时通过状态栏重绘采样估算输出速率(`~tok/s`)。零数据库依赖,兼容 Node 18+。
-  - `"db"`:通过 Node 内置的 `node:sqlite`(需 Node 22.5+)只读查询本地会话数据库 `conversations/<conversation_id>.db` 中的 `gen_metadata` Protobuf 记录,获取精确的累计 token 消耗、纯解码速率(`tok/s`)与首字延迟(`TTFT`)。依赖 CLI 内部存储结构,不可用时静默省略。
-  - `"auto"`:优先尝试 `"db"`,不可用时自动降级到 `"transcript"`。
+- `show_tokens`:在多行模式下用第三行显示当前会话累计的 token 用量,例如 `Tokens 429k [in 107k · cache 317k (75%) · out 5k]`。`in` 是按全价计费的输入,`cache` 是命中提示缓存的输入,百分比是缓存命中率,即 cache ÷ (in + cache),70% 起为绿色,30% 起为黄色。每次请求都会把整段对话重新发一遍,所以这些累计值比上下文进度条涨得快得多:它们统计的是处理过的 token 量,不是上下文大小。终端较窄时缩短为 `Tokens 429k (75% hit)`,单行模式也用这个写法。默认关闭。
+- `show_token_speed`:追加最近一次回复的首 token 延迟和输出速度,`TTFT 3.9s │ 104 tok/s`。速度是这次回复的输出 token(含思考 token)除以 TTFT 加生成耗时,因为模型在输出第一个可见 token 之前就在思考。速度放在最后,数字宽度变化时不会挤动其他内容;终端变窄时先省略方括号里的明细,再省略 TTFT,最后省略速度。默认关闭。
+
+  两者都通过 Node 内置的 `node:sqlite` 以只读方式读取当前会话的数据库 `~/.gemini/antigravity-cli/conversations/<conversation_id>.db`,因此需要 Node 22.13+ 或 23.4+;Node 更旧时这一行不显示。不写入任何文件。会话出现第一次模型回复后,这一行才会显示。
 - `context_value`:`percent`、`tokens` 或 `both`。默认为 `percent`,即上下文显示当前输入侧窗口占用率。存在 token 总量时,百分比和进度条会由 `total_input_tokens / context_window_size` 计算,避免最近一次长输出让 HUD 跳动。
 - `usage_value`:`remaining` 或 `percent`。默认为 `remaining`,即配额文字和进度条都显示剩余量。当 Antigravity 提供 5 小时和周两个窗口时,HUD 会按顺序分开显示各自的刷新倒计时,例如 `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`。
 
@@ -473,6 +471,8 @@ Windows 上没有查找 loopback 服务所需的 `ps` 和 `lsof`,所以 `quota r
 
 `agy-hud doctor` 只读取本地文件、只打印本地事实,不向任何地方发送数据,也不写入任何文件。它唯一运行的程序是 `agy plugin list --json`,即本地列出已安装插件。由于它的输出正是你会贴进 bug 报告的内容,家目录下的路径会缩写成 `~/…`,从而去掉你的账户名。`doctor --json` 保留绝对路径,因为它面向的是同一台机器上的 agent——把这份输出贴到别处之前请先自己过一遍。
 
+打开 `show_tokens` 或 `show_token_speed` 后,每次重绘会以只读方式打开 `~/.gemini/antigravity-cli/conversations/` 下当前会话的数据库,只从每次回复的用量记录(`gen_metadata`)里解码 token 数和耗时,不读取消息内容。只有 CLI 的 `-wal` 和 `-shm` 文件已经存在时才会打开,因为否则 SQLite 的只读打开会把它们建出来;并且只在能正确遵守只读模式的 Node 版本上使用 `node:sqlite`。不写入任何文件,两次重绘之间也不保留任何状态。
+
 请勿在 issue 或 pull request 中放入原始 Antigravity probe 负载、日志、cookie、token、邮箱或本机路径。
 
 ## 开发
@@ -492,3 +492,5 @@ npm test
 在 Antigravity CLI 1.2.2–1.4.6 上,配额刷新启动的 `agy -p /usage` 运行也会调用自定义状态栏命令,此时 `hooks/status-line.sh` 和 `hooks/status-line.cmd` 会把状态栏输入读到结束再退出,不启动 Node(CLI 1.4.7+ 在 `-p` print 模式下已不再启动自定义状态栏命令)。如果旧版 CLI 一直不关闭这个管道([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)),hook 会一直等到被 CLI 终止。这次运行是 print 模式,本来就不显示状态栏。
 
 在 Windows 上,`doctor` 按文本比较路径,所以用 8.3 短路径接入的状态栏会被当成已安装目录之外的另一份拷贝。`hooks/status-line.cmd` 没有[找不到 Node](#找不到-node) 里描述的查找逻辑。`/usage` 超时或输出超限时用 `taskkill /T` 结束,`agy` 还在运行时它启动的辅助进程会一并结束;`agy` 已经退出后才遗留下来的辅助进程这样找不到。CI 只在 Linux 上运行。贡献者提交的 hook 在 Windows 11 + Antigravity CLI 1.4.4 上手动验证过;之后针对 Windows 的改动(`/usage` 路径及其启动和结束 `agy` 的方式、doctor 的 Windows 路径、加固后的 hook)有 Linux 和 macOS 上的测试覆盖,但还没有在 Windows 上实际运行过。
+
+token 行解码的是 CLI 会话数据库里一种内部、没有公开文档的记录格式,已在 Antigravity CLI 1.5.17 上与 CLI 自己的 transcript 逐条核对过总数。CLI 更新如果改变了这种格式,这一行可能会消失,也可能在 agy-hud 跟进之前显示错误的数字。Antigravity CLI 1.5.17 在 macOS 上给出的 `transcript_path` 位于并不存在的 `~/.gemini/antigravity/` 下,这也是改为按会话 ID 定位数据库的原因之一。token 行还没有在 Windows 上实际运行过。
