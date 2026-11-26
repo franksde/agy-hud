@@ -1,536 +1,306 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { strip } from "../src/ansi";
+import { strip, visibleLen } from "../src/ansi";
+import { defaultConfig } from "../src/config";
 import { runCli } from "../src/main";
-import {
-  collectTokenMetrics,
-  decodeGenMetadata,
-  resolveConversationDbPath,
-  SqliteModule
-} from "../src/tokenMetrics";
-import { Payload } from "../src/statusline";
+import { Payload, render } from "../src/statusline";
+import { collectTokenMetrics, decodeGenMetadata, defaultLoadSqlite, resolveConversationDbPath, sqliteSupported, SqliteModule, TokenMetrics } from "../src/tokenMetrics";
+import { spawnSync } from "node:child_process";
 
-// Minimal Protobuf wire encoder for constructing realistic gen_metadata fixtures in tests.
-function encodeVarint(value: bigint | number): Buffer {
-  let n = typeof value === "bigint" ? value : BigInt(value);
-  const bytes: number[] = [];
-  do {
-    let b = Number(n & 0x7fn);
-    n >>= 7n;
-    if (n > 0n) b |= 0x80;
-    bytes.push(b);
-  } while (n > 0n);
-  return Buffer.from(bytes);
+// Every temp dir a test makes is removed when the file finishes.
+const tmpDirs: string[] = [];
+after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
+const tempDir = (prefix: string): string => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(d);
+  return d;
+};
+
+const encVarint = (v: bigint | number): Buffer => {
+  let n = typeof v === "bigint" ? v : BigInt(v);
+  const out: number[] = [];
+  do { let b = Number(n & 0x7fn); n >>= 7n; if (n > 0n) b |= 0x80; out.push(b); } while (n > 0n);
+  return Buffer.from(out);
+};
+const fVarint = (f: number, v: bigint | number) => Buffer.concat([encVarint((f << 3) | 0), encVarint(v)]);
+const fBytes = (f: number, b: Buffer) => Buffer.concat([encVarint((f << 3) | 2), encVarint(b.length), b]);
+const encDur = ([s, ns]: [number, number]) => Buffer.concat([fVarint(1, s), fVarint(2, ns)]);
+
+function encRow(o: { inp: number; out: number; cache?: number; ttft?: [number, number]; gen?: [number, number]; maxU64?: boolean }): Buffer {
+  const usage = [fVarint(1, 1535), fVarint(2, o.inp), fVarint(3, o.out)];
+  if (o.cache !== undefined) usage.push(fVarint(5, o.cache));
+  const f1 = [fBytes(4, Buffer.concat(usage))];
+  if (o.maxU64) f1.push(fBytes(9, fVarint(2, 18446744073709551615n)));
+  if (o.ttft) f1.push(fBytes(11, encDur(o.ttft)));
+  if (o.gen) f1.push(fBytes(12, encDur(o.gen)));
+  return fBytes(1, Buffer.concat(f1));
 }
 
-function fieldVarint(fieldNumber: number, value: bigint | number): Buffer {
-  return Buffer.concat([encodeVarint((fieldNumber << 3) | 0), encodeVarint(value)]);
+function makeStubDb(id = "conv-1"): string {
+  const convDir = tempDir("agy-hud-tok-");
+  // agy keeps a live conversation DB in WAL mode, so its -wal and -shm sidecars exist.
+  for (const suffix of [".db", ".db-wal", ".db-shm"]) fs.writeFileSync(path.join(convDir, `${id}${suffix}`), "stub", "utf8");
+  return convDir;
 }
 
-function fieldBytes(fieldNumber: number, payload: Buffer): Buffer {
-  return Buffer.concat([encodeVarint((fieldNumber << 3) | 2), encodeVarint(payload.length), payload]);
-}
+const fakeSqlite = (rows: unknown[], sqls: string[] = []): SqliteModule => ({
+  DatabaseSync: class { prepare(sql: string) { sqls.push(sql); return { all: () => rows }; } close() {} }
+});
 
-function encodeDuration(seconds: number, nanos: number): Buffer {
-  return Buffer.concat([fieldVarint(1, seconds), fieldVarint(2, nanos)]);
-}
-
-function encodeGenMetadataRow(opts: {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number;
-  thinkingTokens?: number;
-  responseTokens?: number;
-  ttft?: [number, number];
-  genDuration?: [number, number];
-  extraMaxUint64?: boolean;
-}): Buffer {
-  const usageParts: Buffer[] = [
-    fieldVarint(1, 1535),
-    fieldVarint(2, opts.inputTokens),
-    fieldVarint(3, opts.outputTokens)
-  ];
-  if (opts.cacheReadTokens !== undefined) usageParts.push(fieldVarint(5, opts.cacheReadTokens));
-  if (opts.thinkingTokens !== undefined) usageParts.push(fieldVarint(9, opts.thinkingTokens));
-  if (opts.responseTokens !== undefined) usageParts.push(fieldVarint(10, opts.responseTokens));
-  const f1Parts: Buffer[] = [fieldBytes(4, Buffer.concat(usageParts))];
-  if (opts.extraMaxUint64) {
-    // Real agy gen_metadata rows contain f1.f9.f2 = uint64 max (18446744073709551615).
-    f1Parts.push(fieldBytes(9, fieldVarint(2, 18446744073709551615n)));
-  }
-  if (opts.ttft) f1Parts.push(fieldBytes(11, encodeDuration(opts.ttft[0], opts.ttft[1])));
-  if (opts.genDuration) f1Parts.push(fieldBytes(12, encodeDuration(opts.genDuration[0], opts.genDuration[1])));
-  return fieldBytes(1, Buffer.concat(f1Parts));
-}
-
-function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "agy-hud-tok-"));
-}
-
-test("decodeGenMetadata decodes tokens, thinking breakdown, TTFT, and decode duration", () => {
-  const blob = encodeGenMetadataRow({
-    inputTokens: 15303,
-    outputTokens: 1106,
-    cacheReadTokens: 18886,
-    thinkingTokens: 624,
-    responseTokens: 482,
-    ttft: [5, 880_081_800],
-    genDuration: [7, 263_687_200],
-    extraMaxUint64: true
-  });
-  const got = decodeGenMetadata(blob);
+test("decodeGenMetadata decodes valid rows (including uint64 max sibling) and rejects corrupt blobs", () => {
+  const got = decodeGenMetadata(encRow({
+    inp: 15303, out: 1106, cache: 18886, ttft: [5, 880_081_800], gen: [7, 263_687_200], maxU64: true
+  }));
   assert.ok(got);
   assert.equal(got.inputTokens, 15303);
   assert.equal(got.outputTokens, 1106);
   assert.equal(got.cacheReadTokens, 18886);
-  assert.equal(got.thinkingTokens, 624);
   assert.ok(Math.abs((got.ttftSeconds ?? 0) - 5.8800818) < 1e-4);
   assert.ok(Math.abs((got.genDurationSeconds ?? 0) - 7.2636872) < 1e-4);
-});
-
-test("decodeGenMetadata safely returns null on empty or corrupt blobs", () => {
-  assert.equal(decodeGenMetadata(new Uint8Array(0)), null);
-  assert.equal(decodeGenMetadata(new Uint8Array([0xff, 0xff, 0xff])), null);
-  assert.equal(decodeGenMetadata(Buffer.from([0x0a, 0x7f, 0x01])), null);
-});
-
-test("resolveConversationDbPath derives appDataDir from transcript_path and rejects unsafe IDs", () => {
-  const winAppDir = path.join("C:", "Users", "u", ".gemini", "antigravity-cli");
-  const winTranscript = path.join(winAppDir, "brain", "conv-123", ".system_generated", "logs", "transcript.jsonl");
-  assert.equal(
-    resolveConversationDbPath("conv-123", winTranscript, path.join("C:", "Users", "u")),
-    path.join(winAppDir, "conversations", "conv-123.db")
-  );
-  const posixAppDir = path.join("/home", "u", ".gemini", "antigravity-cli");
-  const posixTranscript = path.join(posixAppDir, "brain", "conv-123", ".system_generated", "logs", "transcript.jsonl");
-  assert.equal(
-    resolveConversationDbPath("conv-123", posixTranscript, "/home/u"),
-    path.join(posixAppDir, "conversations", "conv-123.db")
-  );
-  assert.equal(
-    resolveConversationDbPath("conv-123", undefined, "/home/u"),
-    path.join("/home/u", ".gemini", "antigravity-cli", "conversations", "conv-123.db")
-  );
-  for (const badId of ["", "../etc", "a/b", "a\\b", "conv with space"]) {
-    assert.equal(resolveConversationDbPath(badId, winTranscript, "/home/u"), "");
+  for (const bad of [new Uint8Array(0), new Uint8Array([0xff, 0xff, 0xff]), Buffer.from([0x0a, 0x7f, 0x01])]) {
+    assert.equal(decodeGenMetadata(bad), null);
   }
 });
 
-test("Plan A (transcript) incrementally accumulates PLANNER_RESPONSE tokens and ignores partial trailing lines", () => {
-  const dir = tempDir();
-  const transcriptPath = path.join(dir, "transcript.jsonl");
-  const statePath = path.join(dir, "quota_cache.json.tokens.json");
-  const line1 = JSON.stringify({ step_index: 0, type: "USER_INPUT", status: "DONE", content: "hi" });
-  const line2 = JSON.stringify({
-    step_index: 1, type: "PLANNER_RESPONSE", status: "DONE",
-    input_tokens: 10000, cache_read_tokens: 0, output_tokens: 200
-  });
-  const line3 = JSON.stringify({ step_index: 2, type: "GENERIC", status: "DONE", content: "tool output" });
-  const line4Partial = '{"step_index":3,"type":"PLANNER_RESPONSE","status":"DONE","input_tokens":5000';
-  fs.writeFileSync(transcriptPath, `${line1}\n${line2}\n${line3}\n${line4Partial}`, "utf8");
-
-  const payload: Payload = {
-    conversation_id: "conv-a",
-    transcript_path: transcriptPath,
-    agent_state: "idle"
-  };
-
-  const first = collectTokenMetrics(payload, {
-    source: "transcript",
-    statePath,
-    now: new Date("2026-11-26T02:00:00Z")
-  });
-  assert.ok(first);
-  assert.equal(first.source, "transcript");
-  assert.equal(first.inputTokens, 10000);
-  assert.equal(first.cacheReadTokens, 0);
-  assert.equal(first.outputTokens, 200);
-  assert.equal(first.turns, 1);
-
-  // Finish writing line4 and append a 5th line; incremental read should pick up only new bytes.
-  const line4Rest = ',"cache_read_tokens":10000,"output_tokens":400}\n';
-  const line5 = JSON.stringify({
-    step_index: 4, type: "PLANNER_RESPONSE", status: "DONE",
-    input_tokens: 2000, cache_read_tokens: 15000, output_tokens: 600
-  }) + "\n";
-  fs.appendFileSync(transcriptPath, line4Rest + line5, "utf8");
-
-  const second = collectTokenMetrics(payload, {
-    source: "transcript",
-    statePath,
-    now: new Date("2026-11-26T02:00:05Z")
-  });
-  assert.ok(second);
-  assert.equal(second.inputTokens, 17000);
-  assert.equal(second.cacheReadTokens, 25000);
-  assert.equal(second.outputTokens, 1200);
-  assert.equal(second.turns, 3);
-});
-
-test("Plan A falls back to current_usage and context_window totals when transcript is unavailable", () => {
-  const dir = tempDir();
-  const statePath = path.join(dir, "state.json");
-
-  const fromCurrentUsage = collectTokenMetrics({
-    conversation_id: "conv-cu",
-    context_window: {
-      total_input_tokens: 80000,
-      total_output_tokens: 1500,
-      current_usage: {
-        input_tokens: 20000,
-        output_tokens: 500,
-        cache_read_input_tokens: 60000,
-        cache_creation_input_tokens: 1000
-      }
-    },
-    agent_state: "idle"
-  }, { source: "transcript", statePath, now: new Date("2026-11-26T02:00:00Z") });
-  assert.ok(fromCurrentUsage);
-  assert.equal(fromCurrentUsage.inputTokens, 20000);
-  assert.equal(fromCurrentUsage.cacheReadTokens, 60000);
-  assert.equal(fromCurrentUsage.cacheCreationTokens, 1000);
-  assert.equal(fromCurrentUsage.outputTokens, 1500);
-
-  const fromTotalsOnly = collectTokenMetrics({
-    conversation_id: "conv-tot",
-    context_window: {
-      total_input_tokens: 125000,
-      total_output_tokens: 5000
-    },
-    agent_state: "idle"
-  }, { source: "transcript", statePath, now: new Date("2026-11-26T02:00:10Z") });
-  assert.ok(fromTotalsOnly);
-  assert.equal(fromTotalsOnly.inputTokens, 125000);
-  assert.equal(fromTotalsOnly.cacheReadTokens, undefined);
-  assert.equal(fromTotalsOnly.outputTokens, 5000);
-
-  const empty = collectTokenMetrics({
-    conversation_id: "conv-empty",
-    context_window: { used_percentage: 0 },
-    agent_state: "idle"
-  }, { source: "transcript", statePath, now: new Date("2026-11-26T02:00:20Z") });
-  assert.equal(empty, null);
-});
-
-test("Plan A samples output speed across thinking/working frames, excludes tool_use time, and resets on conversation switch", () => {
-  const dir = tempDir();
-  const statePath = path.join(dir, "state.json");
-  const transcriptPath = path.join(dir, "transcript.jsonl");
-  fs.writeFileSync(transcriptPath, "", "utf8");
-
-  const run = (agentState: string, iso: string, convId = "conv-1") => collectTokenMetrics({
-    conversation_id: convId,
-    transcript_path: transcriptPath,
-    agent_state: agentState
-  }, { source: "transcript", statePath, now: new Date(iso) });
-
-  // Turn starts: thinking at t=0
-  assert.equal(run("thinking", "2026-11-26T02:00:00.000Z"), null);
-
-  // Model finishes first response (500 out tokens) at t=5s, entering tool_use
-  fs.appendFileSync(transcriptPath, JSON.stringify({
-    step_index: 1, type: "PLANNER_RESPONSE", status: "DONE",
-    input_tokens: 5000, cache_read_tokens: 0, output_tokens: 500
-  }) + "\n");
-  const afterStep1 = run("tool_use", "2026-11-26T02:00:05.000Z");
-  assert.ok(afterStep1);
-  assert.equal(afterStep1.speedEstimated, true);
-  assert.ok(Math.abs((afterStep1.tokensPerSecond ?? 0) - 100) < 0.1);
-
-  // Tool runs for 30s; speed stays sticky without diluting into tool wait time
-  const duringTool = run("tool_use", "2026-11-26T02:00:35.000Z");
-  assert.ok(duringTool);
-  assert.ok(Math.abs((duringTool.tokensPerSecond ?? 0) - 100) < 0.1);
-
-  // Model resumes thinking at t=40s, produces 600 more tokens in 4s -> 150 tok/s
-  run("thinking", "2026-11-26T02:00:40.000Z");
-  fs.appendFileSync(transcriptPath, JSON.stringify({
-    step_index: 3, type: "PLANNER_RESPONSE", status: "DONE",
-    input_tokens: 3000, cache_read_tokens: 5000, output_tokens: 600
-  }) + "\n");
-  const afterStep2 = run("idle", "2026-11-26T02:00:44.000Z");
-  assert.ok(afterStep2);
-  assert.equal(afterStep2.outputTokens, 1100);
-  assert.ok(Math.abs((afterStep2.tokensPerSecond ?? 0) - 150) < 0.1);
-
-  // Switching conversation clears sticky speed
-  const switched = collectTokenMetrics({
-    conversation_id: "conv-2",
-    context_window: { total_input_tokens: 1000, total_output_tokens: 50 },
-    agent_state: "idle"
-  }, { source: "transcript", statePath, now: new Date("2026-11-26T02:01:00.000Z") });
-  assert.ok(switched);
-  assert.equal(switched.tokensPerSecond, undefined);
-});
-
-test("Plan B (db) reads gen_metadata via injected SQLite, computes exact decode speed and TTFT, and handles short bursts", () => {
-  const dir = tempDir();
-  const convDir = path.join(dir, "conversations");
-  fs.mkdirSync(convDir, { recursive: true });
-  const dbPath = path.join(convDir, "conv-db.db");
-  fs.writeFileSync(dbPath, "stub-db", "utf8");
-  const statePath = path.join(dir, "state.json");
-
-  const rows: Array<{ idx: number; data: Uint8Array }> = [
-    {
-      idx: 0,
-      data: encodeGenMetadataRow({
-        inputTokens: 19284, outputTokens: 81, cacheReadTokens: 0,
-        thinkingTokens: 61, responseTokens: 20,
-        // Very short streaming duration (< 0.25s) should use total (ttft + gen) instead of fake 1000 tok/s
-        ttft: [2, 674_000_000], genDuration: [0, 81_000_000]
-      })
-    }
+test("collectTokenMetrics sums decodable rows and takes last-row TTFT and output/(ttft+gen) speed", () => {
+  const convDir = makeStubDb("conv-sum");
+  const rows = [
+    { data: encRow({ inp: 100_000, cache: 200_000, out: 4_000, ttft: [2, 0], gen: [8, 0] }) },
+    { data: Buffer.from([0xff, 0xff]) },
+    { data: "not-a-blob" },
+    { data: encRow({ inp: 7_000, cache: 117_000, out: 1_000, ttft: [3, 900_000_000], gen: [5, 700_000_000] }) }
   ];
+  const payload: Payload = { conversation_id: "conv-sum" };
+  const got = collectTokenMetrics(payload, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => fakeSqlite(rows) });
+  assert.ok(got);
+  assert.equal(got.inputTokens, 107_000);
+  assert.equal(got.cacheReadTokens, 317_000);
+  assert.equal(got.outputTokens, 5_000);
+  assert.ok(Math.abs((got.ttftSeconds ?? 0) - 3.9) < 0.01);
+  assert.ok(Math.abs((got.tokensPerSecond ?? 0) - 104.17) < 0.05); // 1000 / (3.9 + 5.7)
 
-  let openCount = 0;
-  const fakeSqlite: SqliteModule = {
-    DatabaseSync: class {
-      constructor() { openCount += 1; }
-      prepare() {
-        return {
-          all: (...args: unknown[]) => {
-            const afterIdx = typeof args[0] === "number" ? args[0] : -1;
-            return rows.filter(r => r.idx > afterIdx);
-          }
-        };
-      }
-      close() {}
-    }
-  };
+  const countsOnly = collectTokenMetrics(payload, { includeCounts: true, includeSpeed: false, conversationsDir: convDir, loadSqlite: () => fakeSqlite(rows) });
+  assert.equal(countsOnly?.inputTokens, 107_000);
+  assert.equal(countsOnly?.tokensPerSecond, undefined);
+  assert.equal(countsOnly?.ttftSeconds, undefined);
 
-  const payload: Payload = { conversation_id: "conv-db", agent_state: "idle" };
-  const first = collectTokenMetrics(payload, {
-    source: "db",
-    statePath,
-    conversationsDir: convDir,
-    loadSqlite: () => fakeSqlite
-  });
-  assert.ok(first);
-  assert.equal(first.source, "db");
-  assert.equal(first.inputTokens, 19284);
-  assert.equal(first.cacheReadTokens, 0);
-  assert.equal(first.outputTokens, 81);
-  assert.equal(first.thinkingTokens, 61);
-  assert.equal(first.speedEstimated, false);
-  assert.ok(Math.abs((first.ttftSeconds ?? 0) - 2.674) < 0.01);
-  // 81 / (2.674 + 0.081) ≈ 29.4 tok/s, NOT 1000 tok/s
-  assert.ok((first.tokensPerSecond ?? 0) > 25 && (first.tokensPerSecond ?? 0) < 35);
-  assert.equal(openCount, 1);
-
-  // Unchanged DB + no WAL change hits the stat cache without opening SQLite again.
-  const cached = collectTokenMetrics(payload, {
-    source: "db",
-    statePath,
-    conversationsDir: convDir,
-    loadSqlite: () => fakeSqlite
-  });
-  assert.deepEqual(cached, first);
-  assert.equal(openCount, 1);
-
-  // Append a WAL file + new row: WAL change busts the stat cache and incrementally reads only idx > 0.
-  rows.push({
-    idx: 1,
-    data: encodeGenMetadataRow({
-      inputTokens: 15303, outputTokens: 1106, cacheReadTokens: 18886,
-      thinkingTokens: 624, responseTokens: 482,
-      ttft: [5, 880_000_000], genDuration: [7, 264_000_000]
-    })
-  });
-  fs.writeFileSync(`${dbPath}-wal`, "wal-update", "utf8");
-
-  const updated = collectTokenMetrics(payload, {
-    source: "db",
-    statePath,
-    conversationsDir: convDir,
-    loadSqlite: () => fakeSqlite
-  });
-  assert.ok(updated);
-  assert.equal(openCount, 2);
-  assert.equal(updated.inputTokens, 19284 + 15303);
-  assert.equal(updated.cacheReadTokens, 18886);
-  assert.equal(updated.outputTokens, 81 + 1106);
-  assert.equal(updated.thinkingTokens, 61 + 624);
-  assert.equal(updated.turns, 2);
-  // 1106 / 7.264 ≈ 152.26 tok/s
-  assert.ok(Math.abs((updated.tokensPerSecond ?? 0) - 152.26) < 0.2);
-  assert.ok(Math.abs((updated.ttftSeconds ?? 0) - 5.88) < 0.01);
+  const speedOnly = collectTokenMetrics(payload, { includeCounts: false, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => fakeSqlite(rows) });
+  assert.equal(speedOnly?.inputTokens, 0);
+  assert.equal(speedOnly?.cacheReadTokens, undefined);
+  assert.ok(Math.abs((speedOnly?.tokensPerSecond ?? 0) - 104.17) < 0.05);
 });
 
-test("db mode returns null when sqlite is unavailable, while auto mode falls back cleanly to Plan A", () => {
-  const dir = tempDir();
-  const statePath = path.join(dir, "state.json");
-  const transcriptPath = path.join(dir, "transcript.jsonl");
-  fs.writeFileSync(transcriptPath, JSON.stringify({
-    step_index: 1, type: "PLANNER_RESPONSE", status: "DONE",
-    input_tokens: 4000, cache_read_tokens: 6000, output_tokens: 300
-  }) + "\n");
-
-  const payload: Payload = {
-    conversation_id: "conv-fallback",
-    transcript_path: transcriptPath,
-    agent_state: "idle"
-  };
-
-  const dbOnly = collectTokenMetrics(payload, {
-    source: "db",
-    statePath,
-    conversationsDir: dir,
-    loadSqlite: () => null
-  });
-  assert.equal(dbOnly, null);
-
-  const autoMode = collectTokenMetrics(payload, {
-    source: "auto",
-    statePath,
-    conversationsDir: dir,
-    loadSqlite: () => null
-  });
-  assert.ok(autoMode);
-  assert.equal(autoMode.source, "transcript");
-  assert.equal(autoMode.inputTokens, 4000);
-  assert.equal(autoMode.cacheReadTokens, 6000);
-  assert.equal(autoMode.outputTokens, 300);
+test("collectTokenMetrics omits speed for short/implausible durations and guards TTFT bounds", () => {
+  const convDir = makeStubDb("conv-bounds");
+  const run = (o: Parameters<typeof encRow>[0]) => collectTokenMetrics(
+    { conversation_id: "conv-bounds" },
+    { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => fakeSqlite([{ data: encRow(o) }]) }
+  );
+  const shortDur = run({ inp: 1000, out: 100, ttft: [0, 150_000_000], gen: [0, 50_000_000] });
+  assert.equal(shortDur?.tokensPerSecond, undefined);
+  assert.ok(Math.abs((shortDur?.ttftSeconds ?? 0) - 0.15) < 0.001);
+  assert.equal(run({ inp: 1000, out: 10_000, ttft: [0, 500_000_000], gen: [0, 0] })?.tokensPerSecond, undefined);
+  assert.equal(run({ inp: 1000, out: 100, ttft: [0, 0], gen: [1, 0] })?.ttftSeconds, undefined);
+  assert.equal(run({ inp: 1000, out: 100, ttft: [601, 0], gen: [1, 0] })?.ttftSeconds, undefined);
 });
 
-// Live SQLite integration test: runs whenever Node provides built-in node:sqlite (Node 22.5+).
-let realSqlite: SqliteModule | null = null;
-try {
-  const origWarn = process.emitWarning;
-  process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
-    const msg = typeof warning === "string" ? warning : warning?.message ?? "";
-    if (msg.includes("SQLite")) return;
-    return (origWarn as (...args: unknown[]) => void).call(process, warning, ...rest);
-  }) as typeof process.emitWarning;
-  try {
-    realSqlite = require("node:" + "sqlite") as SqliteModule;
-  } finally {
-    process.emitWarning = origWarn;
+test("collectTokenMetrics guards flags, unsafe IDs, missing DB, null loader, and sqlite throws", () => {
+  const convDir = makeStubDb("conv-guard");
+  let loads = 0;
+  const loader = () => { loads += 1; return fakeSqlite([]); };
+
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-guard" }, { includeCounts: false, includeSpeed: false, conversationsDir: convDir, loadSqlite: loader }), null);
+  for (const badId of ["", "../etc", "a/b", "a\\b", "has space", "a".repeat(129), 42, null]) {
+    assert.equal(resolveConversationDbPath(badId, "/home/u"), null);
+    assert.equal(collectTokenMetrics({ conversation_id: badId as string, transcript_path: "/any/path" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: loader }), null);
   }
-} catch {
-  realSqlite = null;
-}
+  assert.equal(resolveConversationDbPath("conv-1", "/home/u"), path.join("/home/u", ".gemini", "antigravity-cli", "conversations", "conv-1.db"));
+  assert.equal(collectTokenMetrics({ conversation_id: "missing-id" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: loader }), null);
+  assert.equal(loads, 0);
 
-test("Plan B reads a real WAL-mode SQLite database end-to-end without warnings", { skip: realSqlite === null }, () => {
-  const dir = tempDir();
-  const convDir = path.join(dir, "conversations");
-  fs.mkdirSync(convDir, { recursive: true });
-  const dbPath = path.join(convDir, "conv-live.db");
-  const statePath = path.join(dir, "state.json");
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-guard" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => null }), null);
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-guard" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => { throw new Error("boom"); } }), null);
+  const throwing: SqliteModule = { DatabaseSync: class { constructor() { throw new Error("locked"); } prepare() { return { all: () => [] }; } close() {} } };
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-guard" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => throwing }), null);
+});
 
-  const writer = new realSqlite!.DatabaseSync(dbPath);
-  writer.exec?.("PRAGMA journal_mode=WAL; CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB, size INTEGER NOT NULL DEFAULT 0);");
-  const stmt = writer.prepare("INSERT INTO gen_metadata (idx, data, size) VALUES (?, ?, 0)");
-  stmt.run?.(0, encodeGenMetadataRow({
-    inputTokens: 12000, outputTokens: 800, cacheReadTokens: 24000,
-    thinkingTokens: 300, responseTokens: 500,
-    ttft: [4, 200_000_000], genDuration: [6, 400_000_000]
-  }));
+test("sqliteSupported only accepts Node versions whose node:sqlite is unflagged and honours readOnly", () => {
+  for (const v of ["18.20.8", "20.19.0", "22.5.0", "22.12.0", "23.3.0"]) assert.equal(sqliteSupported(v), false, v);
+  for (const v of ["22.13.0", "22.20.1", "23.4.0", "24.0.0", "25.1.0"]) assert.equal(sqliteSupported(v), true, v);
+});
 
+test("collectTokenMetrics never opens a DB whose WAL sidecars are missing, so SQLite cannot create them", () => {
+  const convDir = makeStubDb("conv-nowal");
+  fs.rmSync(path.join(convDir, "conv-nowal.db-wal"));
+  let loads = 0;
+  const opts = { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => { loads += 1; return fakeSqlite([]); } };
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-nowal" }, opts), null);
+  fs.writeFileSync(path.join(convDir, "conv-nowal.db-wal"), "stub");
+  fs.rmSync(path.join(convDir, "conv-nowal.db-shm"));
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-nowal" }, opts), null);
+  assert.equal(loads, 0);
+});
+
+test("speed needs both a valid TTFT and a generation duration and skips trailing zero-output rows", () => {
+  const convDir = makeStubDb("conv-speed");
+  const one = (o: Parameters<typeof encRow>[0], sqls: string[] = [], includeCounts = true) => collectTokenMetrics(
+    { conversation_id: "conv-speed" },
+    { includeCounts, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => fakeSqlite([{ data: encRow(o) }], sqls) }
+  );
+  assert.equal(one({ inp: 1000, out: 500, ttft: [2, 0] })?.tokensPerSecond, undefined);
+  assert.equal(one({ inp: 1000, out: 500, gen: [2, 0] })?.tokensPerSecond, undefined);
+  assert.equal(one({ inp: 1000, out: 500, ttft: [601, 0], gen: [2, 0] })?.tokensPerSecond, undefined);
+  // 13 of 565 real conversation DBs end with an all-zero row; the latest real response still counts.
+  const rows = [
+    { data: encRow({ inp: 1000, out: 500, ttft: [2, 0], gen: [3, 0] }) },
+    { data: encRow({ inp: 0, out: 0, cache: 0, ttft: [0, 0], gen: [0, 0] }) }
+  ];
+  for (const includeCounts of [true, false]) {
+    const got = collectTokenMetrics({ conversation_id: "conv-speed" }, { includeCounts, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => fakeSqlite(rows) });
+    assert.ok(Math.abs((got?.tokensPerSecond ?? 0) - 100) < 0.01, `includeCounts=${includeCounts}`);
+    assert.equal(got?.ttftSeconds, 2);
+  }
+  const countsOnly = collectTokenMetrics({ conversation_id: "conv-speed" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir, loadSqlite: () => fakeSqlite([{ data: encRow({ inp: 900, out: 0, cache: 100 }) }]) });
+  assert.equal(countsOnly?.inputTokens, 900);
+  assert.equal(countsOnly?.tokensPerSecond, undefined);
+});
+
+test("counts that are out of range or of the wrong wire type reject the row, and unsafe sums are dropped", () => {
+  assert.equal(decodeGenMetadata(encRow({ inp: 2 ** 60, out: 1, cache: 5 })), null);
+  const wrongType = fBytes(1, fBytes(4, Buffer.concat([fBytes(2, Buffer.from([1])), fVarint(3, 1), fVarint(5, 9)])));
+  assert.equal(decodeGenMetadata(wrongType), null);
+  const overlong = Buffer.from([0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02]);
+  assert.equal(decodeGenMetadata(fBytes(1, fBytes(4, overlong))), null);
+  const convDir = makeStubDb("conv-huge");
+  const rows = [{ data: encRow({ inp: Number.MAX_SAFE_INTEGER, out: 1, cache: 1 }) }, { data: encRow({ inp: 10, out: 1, cache: 1 }) }];
+  assert.equal(collectTokenMetrics({ conversation_id: "conv-huge" }, { includeCounts: true, includeSpeed: false, conversationsDir: convDir, loadSqlite: () => fakeSqlite(rows) }), null);
+});
+
+test("loading node:sqlite prints nothing to stderr", { skip: !sqliteSupported() }, () => {
+  const mod = path.join(__dirname, "..", "src", "tokenMetrics.js");
+  const r = spawnSync(process.execPath, ["-e", `const m = require(${JSON.stringify(mod)}); if (!m.defaultLoadSqlite()) process.exit(3);`], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, "");
+});
+
+const realSqlite = defaultLoadSqlite();
+
+test("reads a real WAL-mode SQLite DB end-to-end", { skip: realSqlite === null }, () => {
+  const convDir = tempDir("agy-hud-wal-");
+  const writer = new realSqlite!.DatabaseSync(path.join(convDir, "conv-live.db"));
+  writer.exec?.("PRAGMA journal_mode=WAL; CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB);");
+  const ins = writer.prepare("INSERT INTO gen_metadata (idx, data) VALUES (?, ?)");
+  ins.run?.(0, encRow({ inp: 5_000, cache: 10_000, out: 200, ttft: [1, 0], gen: [1, 0] }));
+  ins.run?.(1, encRow({ inp: 12_000, cache: 24_000, out: 800, ttft: [4, 0], gen: [4, 0] }));
   try {
-    const got = collectTokenMetrics(
-      { conversation_id: "conv-live", agent_state: "idle" },
-      { source: "db", statePath, conversationsDir: convDir }
-    );
+    const got = collectTokenMetrics({ conversation_id: "conv-live" }, { includeCounts: true, includeSpeed: true, conversationsDir: convDir });
     assert.ok(got);
-    assert.equal(got.source, "db");
-    assert.equal(got.inputTokens, 12000);
-    assert.equal(got.cacheReadTokens, 24000);
-    assert.equal(got.outputTokens, 800);
-    assert.equal(got.thinkingTokens, 300);
-    assert.ok(Math.abs((got.tokensPerSecond ?? 0) - 125) < 0.1);
-    assert.ok(Math.abs((got.ttftSeconds ?? 0) - 4.2) < 0.01);
+    assert.equal(got.inputTokens, 17_000);
+    assert.equal(got.cacheReadTokens, 34_000);
+    assert.equal(got.outputTokens, 1_000);
+    assert.ok(Math.abs((got.tokensPerSecond ?? 0) - 100) < 0.01); // 800 / (4 + 4)
+    assert.ok(Math.abs((got.ttftSeconds ?? 0) - 4) < 0.01);
   } finally {
     writer.close();
   }
 });
 
-test("runCli statusline switches between Plan A (transcript) and Plan B (db) via config", async () => {
-  const dir = tempDir();
-  const convDir = path.join(dir, "conversations");
-  fs.mkdirSync(convDir, { recursive: true });
-  const dbPath = path.join(convDir, "conv-cli.db");
-  fs.writeFileSync(dbPath, "stub-db", "utf8");
-  const transcriptPath = path.join(dir, "transcript.jsonl");
-  fs.writeFileSync(transcriptPath, JSON.stringify({
-    step_index: 1, type: "PLANNER_RESPONSE", status: "DONE",
-    input_tokens: 10_000, cache_read_tokens: 30_000, output_tokens: 1_000
-  }) + "\n");
-
-  const fakeSqlite: SqliteModule = {
-    DatabaseSync: class {
-      prepare() {
-        return {
-          all: () => [{
-            idx: 0,
-            data: encodeGenMetadataRow({
-              inputTokens: 10_000, outputTokens: 1_000, cacheReadTokens: 30_000,
-              thinkingTokens: 400, responseTokens: 600,
-              ttft: [3, 500_000_000], genDuration: [8, 0]
-            })
-          }]
-        };
-      }
-      close() {}
-    }
+test("renderer formats line 3, hit colors, toggles, width degradation, and single-line mode", () => {
+  const basePayload: Payload = {
+    cwd: "/work/agy-hud", model: { display_name: "Gemini 4 Neon (High)" },
+    context_window: { used_percentage: 12 }, agent_state: "idle", plan_tier: "Ultra", terminal_width: 120
   };
+  const metrics: TokenMetrics = { inputTokens: 107_000, cacheReadTokens: 317_000, outputTokens: 5_000, ttftSeconds: 3.9, tokensPerSecond: 104.2 };
+  const cfg = { ...defaultConfig(), color: false, showTokens: true, showTokenSpeed: true };
 
-  const payload = JSON.stringify({
-    cwd: "agy-hud",
-    conversation_id: "conv-cli",
-    transcript_path: transcriptPath,
-    model: { display_name: "Gemini 4 Neon (XHigh)" },
-    context_window: { used_percentage: 10 },
-    agent_state: "idle",
-    plan_tier: "Google AI Ultra",
-    terminal_width: 140
-  });
+  const full = render(basePayload, { config: cfg, tokenMetrics: metrics }).split("\n");
+  assert.equal(full.length, 3);
+  assert.equal(full[2], "Tokens 429k [in 107k · cache 317k (75%) · out 5k] │ TTFT 3.9s │ 104 tok/s");
 
-  const runWithConfig = async (cfgObj: Record<string, unknown>) => {
-    const cfgPath = path.join(dir, `cfg-${Math.random().toString(36).slice(2)}.json`);
-    const cachePath = path.join(dir, `cache-${Math.random().toString(36).slice(2)}.json`);
-    fs.writeFileSync(cfgPath, JSON.stringify(cfgObj), "utf8");
-    // Seed a fresh cache so the test never triggers a background quota refresh subprocess.
-    fs.writeFileSync(cachePath, JSON.stringify({
-      timestamp: new Date().toISOString(),
-      models: { "Gemini 4 Neon (XHigh)": { remainingFraction: 0.9, resetTime: "2026-12-01T00:00:00Z" } }
-    }), "utf8");
-    const savedCfg = process.env.AGY_HUD_CONFIG;
-    const savedCache = process.env.AGY_HUD_QUOTA_CACHE;
+  const colored = render(basePayload, { config: { ...cfg, color: true }, tokenMetrics: { ...metrics, tokensPerSecond: 9.44 } }).split("\n")[2];
+  assert.ok(colored.includes("\x1b[32m(75%)\x1b[0m"));
+  assert.ok(colored.includes("\x1b[90mTTFT 3.9s\x1b[0m"));
+  assert.ok(colored.includes("\x1b[36m9.4 tok/s\x1b[0m"));
+  assert.ok(render(basePayload, { config: { ...cfg, color: true }, tokenMetrics: { inputTokens: 50_000, cacheReadTokens: 50_000, outputTokens: 1000 } }).split("\n")[2].includes("\x1b[33m(50%)\x1b[0m"));
+  assert.ok(render(basePayload, { config: { ...cfg, color: true }, tokenMetrics: { inputTokens: 90_000, cacheReadTokens: 10_000, outputTokens: 1000 } }).split("\n")[2].includes("\x1b[90m(10%)\x1b[0m"));
+
+  assert.equal(render(basePayload, { config: { ...cfg, showTokens: false }, tokenMetrics: metrics }).split("\n")[2], "TTFT 3.9s │ 104 tok/s");
+  assert.equal(render(basePayload, { config: { ...cfg, showTokenSpeed: false }, tokenMetrics: metrics }).split("\n")[2], "Tokens 429k [in 107k · cache 317k (75%) · out 5k]");
+  assert.equal(render(basePayload, { config: { ...cfg, showTokens: false, showTokenSpeed: false }, tokenMetrics: metrics }).split("\n").length, 2);
+
+  const atWidth = (w: number) => render({ ...basePayload, terminal_width: w }, { config: cfg, tokenMetrics: metrics }).split("\n")[2];
+  assert.equal(atWidth(60), "Tokens 429k (75% hit) │ TTFT 3.9s │ 104 tok/s");
+  assert.equal(atWidth(40), "Tokens 429k (75% hit) │ 104 tok/s");
+  assert.equal(atWidth(25), "Tokens 429k (75% hit)");
+  assert.equal(atWidth(15), "Tokens 429k");
+  assert.equal(visibleLen(atWidth(8)), 8);
+
+  const singleWide = render({ ...basePayload, terminal_width: 140 }, { config: { ...cfg, multiline: false, showIcons: false }, tokenMetrics: metrics });
+  assert.doesNotMatch(singleWide, /\n/);
+  assert.match(singleWide, /Tokens 429k \(75% hit\)  104 tok\/s/);
+  const singleNarrow = render({ ...basePayload, terminal_width: 55 }, { config: { ...cfg, multiline: false, showIcons: false }, tokenMetrics: metrics });
+  assert.ok(visibleLen(singleNarrow) <= 55);
+  assert.doesNotMatch(singleNarrow, /Tokens 429k/);
+  assert.match(singleNarrow, /Ctx 12%.*Idle/);
+  // Speed is dropped before the token segment, as on the multiline token line.
+  const singleMid = render({ ...basePayload, terminal_width: 79 }, { config: { ...cfg, multiline: false, showIcons: false }, tokenMetrics: metrics });
+  assert.ok(visibleLen(singleMid) <= 79);
+  assert.match(singleMid, /Tokens 429k \(75% hit\)/);
+  assert.doesNotMatch(singleMid, /tok\/s/);
+
+  // 999,999 rounds to 1M, never "1000k".
+  const nearMillion = render(basePayload, { config: cfg, tokenMetrics: { inputTokens: 999_999, cacheReadTokens: 0, outputTokens: 0 } }).split("\n")[2];
+  assert.match(nearMillion, /^Tokens 1M /);
+});
+
+test("runCli keeps defaults off and tolerates malformed payload types", async () => {
+  const convDir = makeStubDb("conv-cli");
+  const rows = [{ data: encRow({ inp: 107_000, cache: 317_000, out: 5_000, ttft: [3, 900_000_000], gen: [44, 100_000_000] }) }];
+  let sqliteLoads = 0;
+
+  const run = async (cfgObj: Record<string, unknown>, payloadObj: Record<string, unknown>) => {
+    const dir = tempDir("agy-hud-cli-");
+    const cfgPath = path.join(dir, "cfg.json"), cachePath = path.join(dir, "cache.json");
+    fs.writeFileSync(cfgPath, JSON.stringify(cfgObj));
+    fs.writeFileSync(cachePath, JSON.stringify({ timestamp: new Date().toISOString(), models: {} }));
+    // A background quota refresh would start a real `node quota refresh` against the live agy and
+    // write into this temp dir after it is removed; point the spawn at a no-op script instead.
+    const noop = path.join(dir, "noop.sh");
+    fs.writeFileSync(noop, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const prevCfg = process.env.AGY_HUD_CONFIG, prevCache = process.env.AGY_HUD_QUOTA_CACHE, prevArgv0 = process.argv[0];
     process.env.AGY_HUD_CONFIG = cfgPath;
     process.env.AGY_HUD_QUOTA_CACHE = cachePath;
+    process.argv[0] = noop;
     let out = "";
     try {
       const code = await runCli(["statusline"], {
-        stdin: Readable.from([payload]),
-        stdout: chunk => { out += chunk; },
-        stderr: () => {},
+        stdin: Readable.from([JSON.stringify(payloadObj)]),
+        stdout: s => { out += s; }, stderr: () => {},
         tokenMetricsConversationsDir: convDir,
-        loadSqlite: () => fakeSqlite
+        loadSqlite: () => { sqliteLoads += 1; return fakeSqlite(rows); }
       });
       assert.equal(code, 0);
     } finally {
-      if (savedCfg === undefined) delete process.env.AGY_HUD_CONFIG; else process.env.AGY_HUD_CONFIG = savedCfg;
-      if (savedCache === undefined) delete process.env.AGY_HUD_QUOTA_CACHE; else process.env.AGY_HUD_QUOTA_CACHE = savedCache;
+      process.argv[0] = prevArgv0;
+      if (prevCfg === undefined) delete process.env.AGY_HUD_CONFIG; else process.env.AGY_HUD_CONFIG = prevCfg;
+      if (prevCache === undefined) delete process.env.AGY_HUD_QUOTA_CACHE; else process.env.AGY_HUD_QUOTA_CACHE = prevCache;
     }
     return strip(out).trimEnd();
   };
 
-  // Plan A (default "transcript"): shows transcript totals, no TTFT
-  const planA = await runWithConfig({ color: false, token_metrics_source: "transcript" });
-  assert.equal(planA.split("\n").length, 3);
-  assert.equal(planA.split("\n")[2], "Tok 10k in · 30k hit (75%) · 1k out");
+  const payload = { cwd: "agy-hud", conversation_id: "conv-cli", model: { display_name: "Gemini 4 Neon" }, context_window: { used_percentage: 10 }, agent_state: "idle", terminal_width: 120 };
+  assert.equal((await run({ color: false }, payload)).split("\n").length, 2);
+  assert.equal(sqliteLoads, 0);
 
-  // Plan B ("db"): shows exact decode speed (1000 / 8 = 125 tok/s) and TTFT 3.5s
-  const planB = await runWithConfig({ color: false, token_metrics_source: "db" });
-  assert.equal(planB.split("\n").length, 3);
-  assert.equal(planB.split("\n")[2], "Tok 10k in · 30k hit (75%) · 1k out │ 125 tok/s · TTFT 3.5s");
+  const on = (await run({ color: false, show_tokens: true, show_token_speed: true }, payload)).split("\n");
+  assert.equal(on.length, 3);
+  assert.equal(on[2], "Tokens 429k [in 107k · cache 317k (75%) · out 5k] │ TTFT 3.9s │ 104 tok/s");
+  assert.equal(sqliteLoads, 1);
 
-  // Disabled via config: stays 2 lines
-  const disabled = await runWithConfig({ color: false, show_tokens: false, show_token_speed: false });
-  assert.equal(disabled.split("\n").length, 2);
+  const malformed = await run({ color: false, show_tokens: true, show_token_speed: true }, { ...payload, agent_state: 123, conversation_id: { bad: true } });
+  assert.equal(malformed.split("\n").length, 2);
 });

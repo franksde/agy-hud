@@ -1,7 +1,5 @@
 import fs from "node:fs";
 
-export type TokenMetricsSource = "transcript" | "db" | "auto";
-
 export interface Config {
   showModel: boolean;
   showProgressBar: boolean;
@@ -16,7 +14,6 @@ export interface Config {
   showIcons: boolean;
   showTokens: boolean;
   showTokenSpeed: boolean;
-  tokenMetricsSource: TokenMetricsSource;
   contextValue: string;
   usageValue: string;
   debug: boolean;
@@ -35,9 +32,8 @@ export function defaultConfig(): Config {
     showTitle: false,
     showMode: true,
     showIcons: true,
-    showTokens: true,
-    showTokenSpeed: true,
-    tokenMetricsSource: "transcript",
+    showTokens: false,
+    showTokenSpeed: false,
     contextValue: "percent",
     usageValue: "remaining",
     debug: false
@@ -85,9 +81,6 @@ function merge(base: Config, patch: Record<string, unknown>): Config {
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
   if (typeof patch.show_tokens === "boolean") base.showTokens = patch.show_tokens;
   if (typeof patch.show_token_speed === "boolean") base.showTokenSpeed = patch.show_token_speed;
-  if (patch.token_metrics_source === "transcript" || patch.token_metrics_source === "db" || patch.token_metrics_source === "auto") {
-    base.tokenMetricsSource = patch.token_metrics_source;
-  }
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
   if (typeof patch.debug === "boolean") base.debug = patch.debug;

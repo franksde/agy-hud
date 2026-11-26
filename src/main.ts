@@ -235,7 +235,6 @@ interface CliDeps {
   tokenMetricsHomedir?: string;
   tokenMetricsConversationsDir?: string;
   loadSqlite?: () => SqliteModule | null;
-  now?: Date;
 }
 
 function usage(write: WriteFn): void {
@@ -348,17 +347,20 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<number
     // A same-frame refresh already rewrote the write path, so a corrupt primary is repaired by now.
     // Passing the stale flag on would spawn a second probe for damage that no longer exists.
     triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed, cliVersion, probeRejected);
-    const tokenMetrics =
-      cfg.showTokens || cfg.showTokenSpeed
-        ? collectTokenMetrics(payload, {
-            source: cfg.tokenMetricsSource,
-            statePath: cachePath !== "" ? `${cachePath}.tokens.json` : "",
-            homedir: deps.tokenMetricsHomedir,
-            conversationsDir: deps.tokenMetricsConversationsDir,
-            loadSqlite: deps.loadSqlite,
-            now: deps.now
-          })
-        : null;
+    let tokenMetrics: TokenMetrics | null = null;
+    if (cfg.showTokens || cfg.showTokenSpeed) {
+      try {
+        tokenMetrics = collectTokenMetrics(payload, {
+          includeCounts: cfg.showTokens,
+          includeSpeed: cfg.showTokenSpeed,
+          homedir: deps.tokenMetricsHomedir,
+          conversationsDir: deps.tokenMetricsConversationsDir,
+          loadSqlite: deps.loadSqlite
+        });
+      } catch {
+        tokenMetrics = null;
+      }
+    }
     stdout(`${renderStatusline(raw, cfg, displayCache, tokenMetrics)}\n`);
     return 0;
   }
@@ -926,7 +928,7 @@ function mergeStatuslineRefreshState(
     lastActivityAt: prevState?.lastActivityAt
   };
   if (payload) {
-    next.conversationId = (payload.conversation_id ?? "").trim();
+    next.conversationId = safeString(payload.conversation_id);
     next.agentState = normalizeAgentState(payload.agent_state);
   }
   if (activityRefresh) {
@@ -945,7 +947,7 @@ function shouldTriggerActivityRefresh(
     return false;
   }
 
-  const conversationId = (payload.conversation_id ?? "").trim();
+  const conversationId = safeString(payload.conversation_id);
   const agentState = normalizeAgentState(payload.agent_state);
   const prevConversationId = prevState?.conversationId ?? "";
   const prevAgentState = prevState?.agentState ?? "";
@@ -989,8 +991,12 @@ function activeModelQuotaLooksUntouched(cache: Cache | null, payload: Payload): 
   return quota.remainingFraction >= 1.0;
 }
 
-function normalizeAgentState(raw: string | undefined): string {
-  return (raw ?? "").trim().toLowerCase();
+function safeString(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function normalizeAgentState(raw: unknown): string {
+  return safeString(raw).toLowerCase();
 }
 
 function cacheLooksUntouched(cache: Cache | null): boolean {
