@@ -11,7 +11,7 @@ It reads Antigravity status-line JSON from stdin and renders a short terminal HU
 ## Requirements
 
 - Antigravity CLI 1.1.0 or newer. Install, status-line wiring, rendering and the `/usage` fallback are verified through 1.5.15; the loopback quota probe is verified through 1.1.26 and is refused from 1.2.2 on, where quota refreshes run the official `agy -p /usage` in the background instead (see [Quota Cache](#quota-cache)). The status line is wired with the CLI's native `/statusline` command, which 0.1.8 relies on: the `components` hook that older `plugin.json` files declared is not honored by 1.1.x, so it has been dropped. On a 1.0.x CLI that predates `/statusline` there is no way to activate this version — stay on 0.1.7 or update the CLI.
-- Node.js 18+. `node` does not have to be on the `PATH` the CLI starts the status line with: `hooks/status-line.sh` also looks where nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew install it (see [Node Is Not Found](#node-is-not-found))
+- Node.js 18+. `node` does not have to be on the `PATH` the CLI starts the status line with: `hooks/status-line.sh` also looks where nvm, fnm, Volta, mise, asdf, nodenv, n and Homebrew install it (see [Node Is Not Found](#node-is-not-found)). The optional token line (`show_tokens`, `show_token_speed`) also needs Node 22.13+ or 23.4+, for the built-in `node:sqlite` it reads with; on an older Node that line is left out and the rest of the HUD is unchanged.
 - macOS, Linux, or Windows. On macOS/Linux `hooks/status-line.sh` is used; on Windows `hooks/status-line.cmd` is provided, and the CLI has to be a release that runs the status line through `cmd.exe`, likely 1.1.2 or newer (see [Install From GitHub Release](#install-from-github-release)).
 - A terminal font that carries Nerd Font glyphs, if you want the icons. Without one the four HUD icons render as boxes or `[?]`, which looks like a broken plugin but is not — see [Icons Render As Boxes](#icons-render-as-boxes). Setting `"show_icons": false` gives a plain-text HUD that needs no font at all.
 
@@ -260,7 +260,7 @@ For a genuinely new install:
 
    **Do not install a font on their behalf unless they ask for it.** It is a system-level change, and on its own it fixes nothing: the terminal keeps drawing with the family named in its own profile, and that setting is not reliably scriptable. Over SSH it is worse than useless, because the glyphs are drawn by the terminal on their local machine and a font installed on the remote host cannot change them. If they do want icons, give them the two steps from [Icons Render As Boxes](#icons-render-as-boxes) and let them do the second one.
 
-4. Ask whether they want to adjust `multiline`, `context_value`, or `usage_value` (see [Config](#config)). Then download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, extract it, and run `agy plugin install <extracted-dir>`. Pass the extracted archive directory, never a git clone (see [Install From Local Path](#install-from-local-path) for why). If it fails, show the user the error instead of retrying silently.
+4. Ask whether they want to adjust `multiline`, `context_value`, or `usage_value`, and whether they want the token line (`show_tokens`, `show_token_speed`; off by default, needs Node 22.13+ or 23.4+) (see [Config](#config)). Then download `https://github.com/franksde/agy-hud/releases/latest/download/agy-hud.tar.gz`, extract it, and run `agy plugin install <extracted-dir>`. Pass the extracted archive directory, never a git clone (see [Install From Local Path](#install-from-local-path) for why). If it fails, show the user the error instead of retrying silently.
 
 5. Verify the install with `node <plugin-root>/dist/agy-hud.js doctor --json`, which reports it as machine-readable JSON:
 
@@ -292,6 +292,7 @@ For a genuinely new install:
    Act on it as follows:
 
    - `nodeOk: false` — the runtime is older than 18. Report it; the HUD will not run.
+   - `nodeVersion` — if the user turned on `show_tokens` or `show_token_speed`, the token line needs 22.13+ or 23.4+. Below that, tell them the line will not appear while the rest of the HUD works. It also stays absent until the conversation's first model response.
    - `nodeOk` describes the Node that ran `doctor`, which is the one on your shell's `PATH`. The CLI may start the status line with a shorter `PATH`. If `doctor` passes and the HUD still does not appear, run the check in [Node Is Not Found](#node-is-not-found).
    - `statuslineWired: false` — the CLI is not running this plugin. If `statuslineEnabled` is `false` (for example after `/statusline off`, which sets `statusLine.enabled: false` while keeping `command`), tell the user to run `/statusline enable` in the CLI. Otherwise tell the user to run `/statusline <plugin-root>/hooks/status-line.sh` (`\hooks\status-line.cmd` when `platform` is `win32`), because the HUD does not appear until they do. A `statuslineCommand` that is set but not wired (and enabled) means something else owns their status line; say what it is rather than overwriting it.
    - `showIcons` — confirms which mode step 3 actually landed in.
@@ -355,6 +356,8 @@ Default config:
   "show_title": false,
   "show_mode": true,
   "show_icons": true,
+  "show_tokens": false,
+  "show_token_speed": false,
   "context_value": "percent",
   "usage_value": "remaining"
 }
@@ -370,6 +373,10 @@ Display options:
 - `show_mode`: shows the agent mode chosen with `Shift+Tab` (Antigravity CLI 1.3.5+) at the end of the model segment, before the directory: `Plan`, `Accept Edits` or `Auto`, in cyan, yellow and orange respectively. The `default` mode (`cycle_mode` absent or `"default"`) shows nothing; note that since Antigravity CLI 1.5.7, sessions start in `auto` mode by default wherever Auto mode is available, so `Auto` appears at startup until you switch to `default`. By default a custom status line replaces the CLI's built-in one, which is otherwise the only place the mode stays visible once you start typing (in `settings.json`, `"statusLine": { ..., "stack_with_default": true }` stacks it below the built-in bar instead, and `/statusline off` sets `"enabled": false` to pause the custom command until `/statusline enable`). On by default.
 - `show_title`: shows the conversation title supplied as `conversation_title` by Antigravity CLI 1.1.27+, between the branch and the agent state (before the state on the single line). Off by default. It is reduced to one plain line with control characters removed, clipped to 24 columns, and is the first segment dropped when the line does not fit, before cost.
 - `show_icons`: shows Nerd Font icons. Set to `false` to fall back to plain text if your terminal font renders boxes. Run `doctor` to see the icon probe and the exact fix; [Icons Render As Boxes](#icons-render-as-boxes) covers the whole question.
+- `show_tokens`: shows the conversation's cumulative token use on a third line in multiline mode, for example `Tokens 429k [in 107k · cache 317k (75%) · out 5k]`. `in` is input billed at the full rate, `cache` is input served from the prompt cache, and the percentage is the cache hit rate, cache ÷ (in + cache), green from 70% and yellow from 30%. Every request resends the conversation, so these totals grow much faster than the context bar: they count tokens processed, not context size. A narrow terminal shortens it to `Tokens 429k (75% hit)`, which is also the single-line form. Off by default.
+- `show_token_speed`: adds the latest response's time to first token and output speed, `TTFT 3.9s │ 104 tok/s`. The speed is that response's output tokens, thinking included, divided by TTFT plus generation time, because the model thinks before its first visible token. Speed comes last so its changing width moves nothing else; a narrow terminal drops the breakdown first, then TTFT, then speed. Off by default.
+
+  Both read the current conversation's database, `~/.gemini/antigravity-cli/conversations/<conversation_id>.db`, read-only through Node's built-in `node:sqlite`, so they need Node 22.13+ or 23.4+; on an older Node the line is left out. Nothing is written. The line appears once the conversation has its first model response.
 - `context_value`: `percent`, `tokens`, or `both`. Default is `percent`, so context shows current input-side window occupancy. When token totals are available, the percentage and bar are derived from `total_input_tokens / context_window_size` so a large latest response does not make the HUD jump.
 - `usage_value`: `remaining` or `percent`. Default is `remaining`, so quota text and bar show what is left. When Antigravity provides both windows, the HUD shows them separately with per-window reset durations, for example `Usage ████████░░ 82% (↻ 1h 52m) |  █░░░░░░░░░ 13% (↻ 4d 21h)`.
 
@@ -467,6 +474,8 @@ When `node` is not on `PATH`, `hooks/status-line.sh` reads directory names under
 
 `agy-hud doctor` reads only local files and prints only local facts; it sends nothing anywhere and writes nothing. The one program it runs is `agy plugin list --json`, a local listing of installed plugins. Because its output is what you would paste into a bug report, paths under your home directory are abbreviated to `~/…`, which drops your account name. `doctor --json` keeps them absolute, since it is meant for an agent acting on the same machine — review that output before pasting it anywhere.
 
+With `show_tokens` or `show_token_speed` on, each redraw opens the current conversation's database under `~/.gemini/antigravity-cli/conversations/` read-only and decodes only token counts and timings from its per-response usage records (`gen_metadata`); message content is never read. It opens the file only when the CLI's `-wal` and `-shm` files already exist, because a read-only SQLite open would otherwise create them, and it uses `node:sqlite` only on Node versions that honour read-only mode. Nothing is written or kept between redraws.
+
 Do not put raw Antigravity probe payloads, logs, cookies, tokens, emails, or local machine paths in issues or pull requests.
 
 ## Development
@@ -486,3 +495,5 @@ Quota fields depend on local Antigravity availability and a compatible local cac
 On Antigravity CLI 1.2.2–1.4.6, the `agy -p /usage` run that a quota refresh starts also invokes the custom status-line command, where `hooks/status-line.sh` and `hooks/status-line.cmd` read stdin to its end before exiting without starting Node (CLI 1.4.7+ no longer starts custom status-line commands in `-p` print mode). Should an older CLI hold that pipe open ([antigravity-cli#698](https://github.com/google-antigravity/antigravity-cli/issues/698)), the hook waits until the CLI stops it. That run is print mode and never shows a status line.
 
 On Windows, `doctor` compares paths as text, so a status line wired through an 8.3 short path reads as a copy other than the installed one. `hooks/status-line.cmd` has none of the Node lookup described in [Node Is Not Found](#node-is-not-found). A `/usage` run that times out or exceeds its output cap is ended with `taskkill /T`, which also ends the helpers `agy` started while `agy` is still running; a helper left behind after `agy` has already exited is not found this way. CI runs on Linux only. The contributed hook was verified by hand on Windows 11 with Antigravity CLI 1.4.4; the later changes for Windows (the `/usage` route and how it starts and ends `agy`, doctor's Windows paths and the hardened hook) are covered by tests on Linux and macOS but have not yet been run on Windows.
+
+The token line decodes an internal, undocumented record format of the CLI's conversation database, verified on Antigravity CLI 1.5.17 by checking its totals against the CLI's own transcript. A CLI update that changes that format can make the line disappear, or show wrong numbers until agy-hud is updated. Antigravity CLI 1.5.17 on macOS reports a `transcript_path` under `~/.gemini/antigravity/` that does not exist, which is one reason the database is located by conversation ID instead. The token line has not yet been run on Windows.

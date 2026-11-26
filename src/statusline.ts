@@ -1,6 +1,7 @@
 import { Config } from "./config";
 import { truncateColumns, visibleLen } from "./ansi";
 import { Cache, isUnsetResetTime, matchModel, usagePercent as quotaUsagePercent } from "./quota";
+import type { TokenMetrics } from "./tokenMetrics";
 import path from "node:path";
 
 const colorReset = "\x1b[0m";
@@ -77,6 +78,7 @@ interface QuotaDisplay {
 export interface RenderOptions {
   config: Config;
   quota?: Cache | null;
+  tokenMetrics?: TokenMetrics | null;
   gitBranch?: string;
   now?: Date;
 }
@@ -139,12 +141,12 @@ export function render(payload: Payload, opts: RenderOptions): string {
   const stateLabel = state(payload.agent_state ?? "");
   const quota = quotaInfo(opts.quota, modelDisplay, payload.quota, opts.now ?? new Date());
   if (config.multiline) {
-    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel);
+    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel, opts.tokenMetrics ?? null);
   }
-  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel);
+  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel, opts.tokenMetrics ?? null);
 }
 
-function renderMultiline(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quota: QuotaDisplay, branch: string, stateLabel: string): string {
+function renderMultiline(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quota: QuotaDisplay, branch: string, stateLabel: string, tokenMetrics: TokenMetrics | null): string {
   const line1Parts = [colorize(modelSegment, colorBlue, config.color)];
   if (config.showCWD && payload.cwd) {
     line1Parts.push(colorize(withIcon(config, " ", "") + path.basename(payload.cwd), colorYellow, config.color));
@@ -221,10 +223,11 @@ function renderMultiline(payload: Payload, config: Config, width: number, modelS
     line2 = `${formatInt(ctxPct)}%`;
   }
   line2 = fit(line2, width);
-  return `${line1}\n${line2}`;
+  const line3 = renderTokenLine(tokenMetrics, config, width);
+  return line3 !== "" ? `${line1}\n${line2}\n${line3}` : `${line1}\n${line2}`;
 }
 
-function renderSingleLine(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quota: QuotaDisplay, stateLabel: string): string {
+function renderSingleLine(payload: Payload, config: Config, width: number, modelSegment: string, ctxPct: number, quota: QuotaDisplay, stateLabel: string, tokenMetrics: TokenMetrics | null): string {
   const coloredBadge = colorize(modelSegment, colorBlue, config.color);
   const ctx = `Ctx ${contextValue(config, payload.context_window, ctxPct)}`;
   let tokens = tokenDetail(payload.context_window);
@@ -244,12 +247,15 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   const costText = renderCost(payload.cost, config);
   const titleText = renderTitle(payload.conversation_title, config);
+  const { single: tokText, speed: speedText } = tokenParts(tokenMetrics, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
-    [coloredBadge, ctx, tokens, bar, usage, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage, tokText, speedText, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage, tokText, speedText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage, tokText, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage, stateText],
     [coloredBadge, ctx, bar, usage, stateText],
@@ -265,6 +271,50 @@ function renderSingleLine(payload: Payload, config: Config, width: number, model
     }
   }
   return fit(`${formatInt(ctxPct)}% ${stateLabel}`, width);
+}
+
+function tokenParts(metrics: TokenMetrics | null, config: Config) {
+  let full = "", short = "", bare = "", single = "";
+  const pos = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+  if (config.showTokens && metrics) {
+    const inp = pos(metrics.inputTokens), out = pos(metrics.outputTokens), cache = pos(metrics.cacheReadTokens);
+    const hasCache = typeof metrics.cacheReadTokens === "number";
+    if (inp + cache + out > 0) {
+      bare = `Tokens ${formatTokens(inp + cache + out)}`;
+      const hitPct = hasCache && inp + cache > 0 ? clampInt(Math.trunc((cache / (inp + cache)) * 100 + 0.5)) : null;
+      const hitText = hitPct !== null ? `${formatInt(hitPct)}% hit` : "";
+      const hit = hitPct !== null ? colorize(hitText, hitColor(hitPct), config.color) : "";
+      const pct = hitPct !== null ? colorize(`(${formatInt(hitPct)}%)`, hitColor(hitPct), config.color) : "";
+      const cacheText = hasCache ? `cache ${formatTokens(cache)}${pct ? ` ${pct}` : ""}` : "";
+      full = `${bare} [${[`in ${formatTokens(inp)}`, cacheText, `out ${formatTokens(out)}`].filter(Boolean).join(" · ")}]`;
+      short = hit ? `${bare} (${hit})` : bare;
+      single = colorize(hitText ? `${bare} (${hitText})` : bare, colorMuted, config.color);
+    }
+  }
+  const ttftVal = config.showTokenSpeed ? pos(metrics?.ttftSeconds) : 0;
+  const tpsVal = config.showTokenSpeed ? pos(metrics?.tokensPerSecond) : 0;
+  const ttft = ttftVal > 0 ? colorize(`TTFT ${ttftVal.toFixed(1)}s`, colorMuted, config.color) : "";
+  const speed = tpsVal > 0 ? colorize(`${tpsVal >= 10 ? Math.round(tpsVal) : tpsVal.toFixed(1)} tok/s`, colorCyan, config.color) : "";
+  return { full, short, bare, single, ttft, speed };
+}
+
+function hitColor(pct: number): string {
+  return pct >= 70 ? colorGreen : pct >= 30 ? colorYellow : colorMuted;
+}
+
+// Speed comes last so its changing width never shifts the other fields.
+function renderTokenLine(metrics: TokenMetrics | null, config: Config, width: number): string {
+  const { full, short, bare, ttft, speed } = tokenParts(metrics, config);
+  const candidates = [
+    joinHeader(full, ttft, speed),
+    joinHeader(short, ttft, speed),
+    joinHeader(short, speed),
+    short,
+    bare || joinHeader(ttft, speed),
+    speed
+  ].filter(Boolean);
+  for (const line of candidates) if (visibleLen(line) <= width) return line;
+  return candidates.length > 0 ? fit(candidates[candidates.length - 1], width) : "";
 }
 
 function renderModelSegment(shortModel: string, rawPlan: string, config: Config): string {
@@ -688,7 +738,8 @@ function tokenDetail(ctx: Payload["context_window"]): string {
 }
 
 function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
+  // From 999,500 the "k" form would round up to "1000k".
+  if (n >= 999_500) {
     if (n % 1_000_000 === 0) {
       return `${formatInt(n / 1_000_000)}M`;
     }
@@ -724,8 +775,9 @@ function percentageColor(pct: number): string {
   return colorGreen;
 }
 
-function state(raw: string): string {
-  switch (raw.toLowerCase()) {
+function state(raw: unknown): string {
+  const text = typeof raw === "string" ? raw : "";
+  switch (text.toLowerCase()) {
     case "":
     case "idle":
       return "Idle";
@@ -744,7 +796,7 @@ function state(raw: string): string {
     case "error":
       return "Error";
     default:
-      return title(raw.replace(/_/g, " "));
+      return title(text.replace(/_/g, " "));
   }
 }
 

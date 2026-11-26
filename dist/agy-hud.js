@@ -164,9 +164,9 @@ __export(main_exports, {
   version: () => version
 });
 module.exports = __toCommonJS(main_exports);
-var import_node_fs6 = __toESM(require("node:fs"));
-var import_node_os2 = __toESM(require("node:os"));
-var import_node_path5 = __toESM(require("node:path"));
+var import_node_fs7 = __toESM(require("node:fs"));
+var import_node_os3 = __toESM(require("node:os"));
+var import_node_path6 = __toESM(require("node:path"));
 var import_node_child_process3 = require("node:child_process");
 var import_node_crypto = require("node:crypto");
 
@@ -185,6 +185,8 @@ function defaultConfig() {
     showTitle: false,
     showMode: true,
     showIcons: true,
+    showTokens: false,
+    showTokenSpeed: false,
     contextValue: "percent",
     usageValue: "remaining",
     debug: false
@@ -224,6 +226,8 @@ function merge(base, patch) {
   if (typeof patch.show_title === "boolean") base.showTitle = patch.show_title;
   if (typeof patch.show_mode === "boolean") base.showMode = patch.show_mode;
   if (typeof patch.show_icons === "boolean") base.showIcons = patch.show_icons;
+  if (typeof patch.show_tokens === "boolean") base.showTokens = patch.show_tokens;
+  if (typeof patch.show_token_speed === "boolean") base.showTokenSpeed = patch.show_token_speed;
   if (typeof patch.context_value === "string" && patch.context_value !== "") base.contextValue = patch.context_value;
   if (typeof patch.usage_value === "string" && patch.usage_value !== "") base.usageValue = patch.usage_value;
   if (typeof patch.debug === "boolean") base.debug = patch.debug;
@@ -928,11 +932,11 @@ function render(payload, opts) {
   const stateLabel = state(payload.agent_state ?? "");
   const quota = quotaInfo(opts.quota, modelDisplay, payload.quota, opts.now ?? /* @__PURE__ */ new Date());
   if (config.multiline) {
-    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel);
+    return renderMultiline(payload, config, width, modelSegment, ctxPct, quota, opts.gitBranch ?? "", stateLabel, opts.tokenMetrics ?? null);
   }
-  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel);
+  return renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel, opts.tokenMetrics ?? null);
 }
-function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, branch2, stateLabel) {
+function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, branch2, stateLabel, tokenMetrics) {
   const line1Parts = [colorize(modelSegment, colorBlue, config.color)];
   if (config.showCWD && payload.cwd) {
     line1Parts.push(colorize(withIcon(config, "\uF07C ", "") + import_node_path4.default.basename(payload.cwd), colorYellow, config.color));
@@ -1006,10 +1010,13 @@ function renderMultiline(payload, config, width, modelSegment, ctxPct, quota, br
     line2 = `${formatInt(ctxPct)}%`;
   }
   line2 = fit(line2, width);
-  return `${line1}
+  const line3 = renderTokenLine(tokenMetrics, config, width);
+  return line3 !== "" ? `${line1}
+${line2}
+${line3}` : `${line1}
 ${line2}`;
 }
-function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel) {
+function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, stateLabel, tokenMetrics) {
   const coloredBadge = colorize(modelSegment, colorBlue, config.color);
   const ctx = `Ctx ${contextValue(config, payload.context_window, ctxPct)}`;
   let tokens = tokenDetail(payload.context_window);
@@ -1029,12 +1036,15 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
   const stateText = config.showAgentState ? colorize(stateLabel, stateColor(stateLabel), config.color) : "";
   const costText = renderCost(payload.cost, config);
   const titleText = renderTitle(payload.conversation_title, config);
+  const { single: tokText, speed: speedText } = tokenParts(tokenMetrics, config);
   let bar = "";
   if (config.showProgressBar) {
     bar = progressBar(ctxPct, 10, config.color);
   }
   const levels = [
-    [coloredBadge, ctx, tokens, bar, usage2, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage2, tokText, speedText, titleText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage2, tokText, speedText, stateText, costText],
+    [coloredBadge, ctx, tokens, bar, usage2, tokText, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText, costText],
     [coloredBadge, ctx, tokens, bar, usage2, stateText],
     [coloredBadge, ctx, bar, usage2, stateText],
@@ -1050,6 +1060,46 @@ function renderSingleLine(payload, config, width, modelSegment, ctxPct, quota, s
     }
   }
   return fit(`${formatInt(ctxPct)}% ${stateLabel}`, width);
+}
+function tokenParts(metrics, config) {
+  let full = "", short = "", bare = "", single = "";
+  const pos = (n) => typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+  if (config.showTokens && metrics) {
+    const inp = pos(metrics.inputTokens), out = pos(metrics.outputTokens), cache = pos(metrics.cacheReadTokens);
+    const hasCache = typeof metrics.cacheReadTokens === "number";
+    if (inp + cache + out > 0) {
+      bare = `Tokens ${formatTokens(inp + cache + out)}`;
+      const hitPct = hasCache && inp + cache > 0 ? clampInt(Math.trunc(cache / (inp + cache) * 100 + 0.5)) : null;
+      const hitText = hitPct !== null ? `${formatInt(hitPct)}% hit` : "";
+      const hit = hitPct !== null ? colorize(hitText, hitColor(hitPct), config.color) : "";
+      const pct = hitPct !== null ? colorize(`(${formatInt(hitPct)}%)`, hitColor(hitPct), config.color) : "";
+      const cacheText = hasCache ? `cache ${formatTokens(cache)}${pct ? ` ${pct}` : ""}` : "";
+      full = `${bare} [${[`in ${formatTokens(inp)}`, cacheText, `out ${formatTokens(out)}`].filter(Boolean).join(" \xB7 ")}]`;
+      short = hit ? `${bare} (${hit})` : bare;
+      single = colorize(hitText ? `${bare} (${hitText})` : bare, colorMuted, config.color);
+    }
+  }
+  const ttftVal = config.showTokenSpeed ? pos(metrics?.ttftSeconds) : 0;
+  const tpsVal = config.showTokenSpeed ? pos(metrics?.tokensPerSecond) : 0;
+  const ttft = ttftVal > 0 ? colorize(`TTFT ${ttftVal.toFixed(1)}s`, colorMuted, config.color) : "";
+  const speed = tpsVal > 0 ? colorize(`${tpsVal >= 10 ? Math.round(tpsVal) : tpsVal.toFixed(1)} tok/s`, colorCyan, config.color) : "";
+  return { full, short, bare, single, ttft, speed };
+}
+function hitColor(pct) {
+  return pct >= 70 ? colorGreen : pct >= 30 ? colorYellow : colorMuted;
+}
+function renderTokenLine(metrics, config, width) {
+  const { full, short, bare, ttft, speed } = tokenParts(metrics, config);
+  const candidates = [
+    joinHeader(full, ttft, speed),
+    joinHeader(short, ttft, speed),
+    joinHeader(short, speed),
+    short,
+    bare || joinHeader(ttft, speed),
+    speed
+  ].filter(Boolean);
+  for (const line of candidates) if (visibleLen(line) <= width) return line;
+  return candidates.length > 0 ? fit(candidates[candidates.length - 1], width) : "";
 }
 function renderModelSegment(shortModel, rawPlan, config) {
   const trimmed = rawPlan.trim();
@@ -1392,7 +1442,7 @@ function tokenDetail(ctx) {
   return `(${formatTokens(total)}/${formatTokens(windowSize)})`;
 }
 function formatTokens(n) {
-  if (n >= 1e6) {
+  if (n >= 999500) {
     if (n % 1e6 === 0) {
       return `${formatInt(n / 1e6)}M`;
     }
@@ -1425,7 +1475,8 @@ function percentageColor(pct) {
   return colorGreen;
 }
 function state(raw) {
-  switch (raw.toLowerCase()) {
+  const text = typeof raw === "string" ? raw : "";
+  switch (text.toLowerCase()) {
     case "":
     case "idle":
       return "Idle";
@@ -1444,7 +1495,7 @@ function state(raw) {
     case "error":
       return "Error";
     default:
-      return title(raw.replace(/_/g, " "));
+      return title(text.replace(/_/g, " "));
   }
 }
 function stateColor(label) {
@@ -1511,6 +1562,182 @@ function title(raw) {
   }
   return fields.join(" ");
 }
+
+// src/tokenMetrics.ts
+var import_node_fs6 = __toESM(require("node:fs"));
+var import_node_os2 = __toESM(require("node:os"));
+var import_node_path5 = __toESM(require("node:path"));
+var safeConversationId = /^[0-9A-Za-z_-]{1,128}$/;
+var cachedSqlite;
+function sqliteSupported(version2 = process.versions.node) {
+  const [major, minor] = version2.split(".").map(Number);
+  return major > 23 || major === 23 && minor >= 4 || major === 22 && minor >= 13;
+}
+function defaultLoadSqlite() {
+  if (cachedSqlite !== void 0) return cachedSqlite;
+  if (!sqliteSupported()) return cachedSqlite = null;
+  const orig = process.emitWarning;
+  process.emitWarning = ((w, ...rest) => {
+    if ((typeof w === "string" ? w : w?.message ?? "").includes("SQLite")) return;
+    return orig.call(process, w, ...rest);
+  });
+  try {
+    const mod = require("node:sqlite");
+    cachedSqlite = typeof mod?.DatabaseSync === "function" ? mod : null;
+  } catch {
+    cachedSqlite = null;
+  } finally {
+    process.emitWarning = orig;
+  }
+  return cachedSqlite;
+}
+function resolveConversationDbPath(id, homedir = import_node_os2.default.homedir(), conversationsDir) {
+  if (typeof id !== "string" || !safeConversationId.test(id)) return null;
+  const dir = conversationsDir || (homedir ? import_node_path5.default.join(homedir, ".gemini", "antigravity-cli", "conversations") : "");
+  return dir ? import_node_path5.default.join(dir, `${id}.db`) : null;
+}
+function collectTokenMetrics(payload, opts) {
+  if (!payload || !opts.includeCounts && !opts.includeSpeed) return null;
+  const dbPath = resolveConversationDbPath(payload.conversation_id, opts.homedir, opts.conversationsDir);
+  if (!dbPath || ![dbPath, `${dbPath}-wal`, `${dbPath}-shm`].every(isFile)) return null;
+  let inputTokens = 0, cacheReadTokens = 0, outputTokens = 0;
+  let last = null, decoded = false;
+  let db;
+  try {
+    const sqlite = (opts.loadSqlite ?? defaultLoadSqlite)();
+    if (!sqlite) return null;
+    db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+    for (const row of db.prepare("SELECT data FROM gen_metadata ORDER BY idx").all()) {
+      const data = typeof row === "object" && row !== null ? row.data : null;
+      const d = data instanceof Uint8Array ? decodeGenMetadata(data) : null;
+      if (!d) continue;
+      inputTokens += d.inputTokens;
+      cacheReadTokens += d.cacheReadTokens;
+      outputTokens += d.outputTokens;
+      decoded = true;
+      if (d.outputTokens > 0) last = d;
+    }
+  } catch {
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+    }
+  }
+  if (!decoded || ![inputTokens, cacheReadTokens, outputTokens].every(Number.isSafeInteger)) return null;
+  let ttftSeconds, tokensPerSecond;
+  if (opts.includeSpeed && last) {
+    const ttft = last.ttftSeconds, gen = last.genDurationSeconds;
+    if (ttft !== void 0 && ttft > 0 && ttft <= 600) ttftSeconds = ttft;
+    if (ttftSeconds !== void 0 && gen !== void 0 && gen > 0 && ttftSeconds + gen >= 0.25 && last.outputTokens > 0) {
+      const tps = last.outputTokens / (ttftSeconds + gen);
+      if (Number.isFinite(tps) && tps <= 5e3) tokensPerSecond = tps;
+    }
+  }
+  const hasCounts = opts.includeCounts && (inputTokens > 0 || cacheReadTokens > 0 || outputTokens > 0);
+  if (!hasCounts && ttftSeconds === void 0 && tokensPerSecond === void 0) return null;
+  return {
+    inputTokens: opts.includeCounts ? inputTokens : 0,
+    cacheReadTokens: opts.includeCounts ? cacheReadTokens : void 0,
+    outputTokens: opts.includeCounts ? outputTokens : 0,
+    ttftSeconds,
+    tokensPerSecond
+  };
+}
+function decodeGenMetadata(bytes) {
+  if (bytes.length === 0) return null;
+  let inner = null;
+  if (!scanProto(bytes, (f, w, _v, s) => {
+    if (f === 1 && w === 2 && s) inner = s;
+  }) || !inner) return null;
+  let usage2 = null, ttft = null, gen = null;
+  if (!scanProto(inner, (f, w, _v, s) => {
+    if (w !== 2 || !s) return;
+    if (f === 4) usage2 = s;
+    else if (f === 11) ttft = s;
+    else if (f === 12) gen = s;
+  }) || !usage2) return null;
+  let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, valid = true;
+  if (!scanProto(usage2, (f, w, v) => {
+    if (f !== 2 && f !== 3 && f !== 5) return;
+    const n = w === 0 && v !== void 0 ? safeNonNeg(v) : null;
+    if (n === null) {
+      valid = false;
+      return;
+    }
+    if (f === 2) inputTokens = n;
+    else if (f === 3) outputTokens = n;
+    else cacheReadTokens = n;
+  }) || !valid) return null;
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    ttftSeconds: ttft ? decodeDuration(ttft) : void 0,
+    genDurationSeconds: gen ? decodeDuration(gen) : void 0
+  };
+}
+function decodeDuration(bytes) {
+  let seconds = 0, nanos = 0, valid = true;
+  const ok = scanProto(bytes, (f, w, v) => {
+    if (w !== 0 || v === void 0 || f !== 1 && f !== 2) return;
+    const n = safeNonNeg(v);
+    if (n === null) {
+      valid = false;
+      return;
+    }
+    if (f === 1) seconds = n;
+    else nanos = n;
+  });
+  return ok && valid && nanos < 1e9 ? seconds + nanos / 1e9 : void 0;
+}
+function scanProto(bytes, onField) {
+  let off = 0;
+  while (off < bytes.length) {
+    const key = readVarint(bytes, off);
+    if (!key) return false;
+    off = key.next;
+    const f = Number(key.val >> 3n), w = Number(key.val & 7n);
+    if (f <= 0 || !Number.isSafeInteger(f)) return false;
+    if (w === 0) {
+      const v = readVarint(bytes, off);
+      if (!v) return false;
+      off = v.next;
+      onField(f, 0, v.val);
+    } else if (w === 1 || w === 5) {
+      const step = w === 1 ? 8 : 4;
+      if (off + step > bytes.length) return false;
+      off += step;
+    } else if (w === 2) {
+      const len = readVarint(bytes, off), size = len ? safeNonNeg(len.val) : null;
+      if (!len || size === null || len.next + size > bytes.length) return false;
+      off = len.next;
+      onField(f, 2, void 0, bytes.subarray(off, off + size));
+      off += size;
+    } else return false;
+  }
+  return true;
+}
+function readVarint(bytes, off) {
+  let val = 0n, shift = 0n;
+  while (off < bytes.length) {
+    const b = bytes[off++];
+    if (shift === 63n && b > 1) return null;
+    val |= BigInt(b & 127) << shift;
+    if ((b & 128) === 0) return { val, next: off };
+    if ((shift += 7n) > 63n) return null;
+  }
+  return null;
+}
+function isFile(p) {
+  try {
+    return import_node_fs6.default.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+var safeNonNeg = (v) => v >= 0n && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : null;
 
 // src/doctor.ts
 var iconProbe = [
@@ -1879,7 +2106,7 @@ var sameFrameRefreshBudgetMs = 2e3;
 var stdinTimeoutMs = 1e3;
 var consumedQuotaRefreshMs = 15 * 1e3;
 var untouchedQuotaRefreshMs = 30 * 1e3;
-function renderStatusline(input, cfg = defaultConfig(), cache = null) {
+function renderStatusline(input, cfg = defaultConfig(), cache = null, tokenMetrics = null) {
   if (input.trim() === "") {
     return "agy-hud";
   }
@@ -1906,6 +2133,7 @@ function renderStatusline(input, cfg = defaultConfig(), cache = null) {
     return render(payload, {
       config: cfg,
       quota: cache,
+      tokenMetrics,
       gitBranch: branch2
     });
   } catch {
@@ -1921,26 +2149,26 @@ function configPaths() {
   paths.push(...pluginConfigPaths());
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
-    paths.push(import_node_path5.default.join(xdg, "agy-hud", "config.json"));
+    paths.push(import_node_path6.default.join(xdg, "agy-hud", "config.json"));
   }
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (home) {
-    paths.push(import_node_path5.default.join(home, ".config", "agy-hud", "config.json"));
+    paths.push(import_node_path6.default.join(home, ".config", "agy-hud", "config.json"));
   }
   return paths;
 }
 function pluginConfigPaths() {
-  const dir = import_node_path5.default.dirname(__filename);
-  return [import_node_path5.default.join(dir, "config.json"), import_node_path5.default.join(dir, "..", "config.json")];
+  const dir = import_node_path6.default.dirname(__filename);
+  return [import_node_path6.default.join(dir, "config.json"), import_node_path6.default.join(dir, "..", "config.json")];
 }
 function userConfigPath() {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) {
-    return import_node_path5.default.join(xdg, "agy-hud", "config.json");
+    return import_node_path6.default.join(xdg, "agy-hud", "config.json");
   }
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (home) {
-    return import_node_path5.default.join(home, ".config", "agy-hud", "config.json");
+    return import_node_path6.default.join(home, ".config", "agy-hud", "config.json");
   }
   return "";
 }
@@ -1950,21 +2178,21 @@ function quotaCacheWritePath() {
     return explicit;
   }
   const xdg = process.env.XDG_CACHE_HOME;
-  if (xdg && import_node_path5.default.isAbsolute(xdg)) {
-    return import_node_path5.default.join(xdg, "agy-hud", "quota_cache.json");
+  if (xdg && import_node_path6.default.isAbsolute(xdg)) {
+    return import_node_path6.default.join(xdg, "agy-hud", "quota_cache.json");
   }
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (!home) {
     return "";
   }
-  return import_node_path5.default.join(home, ".cache", "agy-hud", "quota_cache.json");
+  return import_node_path6.default.join(home, ".cache", "agy-hud", "quota_cache.json");
 }
 function legacyQuotaCachePath() {
-  const home = import_node_os2.default.homedir();
+  const home = import_node_os3.default.homedir();
   if (!home) {
     return "";
   }
-  return import_node_path5.default.join(home, ".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
+  return import_node_path6.default.join(home, ".gemini", "antigravity-cli", "scratch", "agy-hud", "quota_cache.json");
 }
 function quotaCacheReadCandidates() {
   if (process.env.AGY_HUD_QUOTA_CACHE) {
@@ -1981,7 +2209,7 @@ function loadQuotaFromCandidates(candidates) {
     if (ok) {
       return [cache, true, primaryUnloadable];
     }
-    if (index === 0 && import_node_fs6.default.existsSync(candidate)) {
+    if (index === 0 && import_node_fs7.default.existsSync(candidate)) {
       primaryUnloadable = true;
     }
   }
@@ -2009,7 +2237,7 @@ function shouldUseProcessCWD(payloadCWD) {
   if (payloadCWD.trim() === "") {
     return true;
   }
-  return import_node_path5.default.basename(process.cwd()) === import_node_path5.default.basename(payloadCWD);
+  return import_node_path6.default.basename(process.cwd()) === import_node_path6.default.basename(payloadCWD);
 }
 function validGitCandidatePath(candidate) {
   const trimmed = candidate.trim();
@@ -2017,7 +2245,7 @@ function validGitCandidatePath(candidate) {
     return false;
   }
   try {
-    return import_node_fs6.default.statSync(trimmed).isDirectory();
+    return import_node_fs7.default.statSync(trimmed).isDirectory();
   } catch {
     return false;
   }
@@ -2053,7 +2281,7 @@ function fcList() {
 function agyPluginList() {
   try {
     return (0, import_node_child_process3.execFileSync)("agy", ["plugin", "list", "--json"], {
-      cwd: import_node_os2.default.tmpdir(),
+      cwd: import_node_os3.default.tmpdir(),
       windowsHide: true,
       encoding: "utf8",
       timeout: 5e3,
@@ -2070,20 +2298,20 @@ function doctorDepsFromEnv() {
     nodeVersion: process.version,
     platform: process.platform,
     env: process.env,
-    homedir: import_node_os2.default.homedir(),
+    homedir: import_node_os3.default.homedir(),
     configPaths: configPaths(),
     userConfigPath: userConfigPath(),
     pluginConfigPaths: pluginConfigPaths(),
     readFile: (filePath) => {
       try {
-        return import_node_fs6.default.readFileSync(filePath, "utf8");
+        return import_node_fs7.default.readFileSync(filePath, "utf8");
       } catch {
         return null;
       }
     },
     listDir: (dirPath) => {
       try {
-        return import_node_fs6.default.readdirSync(dirPath);
+        return import_node_fs7.default.readdirSync(dirPath);
       } catch {
         return [];
       }
@@ -2127,7 +2355,21 @@ async function runCli(args, deps = {}) {
       deps.sameFrameRefreshBudgetMs ?? sameFrameRefreshBudgetMs
     );
     triggerBackgroundRefreshIfNeeded(cachePath, displayCache, payload, primaryUnloadable && !refreshed, cliVersion, probeRejected);
-    stdout(`${renderStatusline(raw, cfg, displayCache)}
+    let tokenMetrics = null;
+    if (cfg.showTokens || cfg.showTokenSpeed) {
+      try {
+        tokenMetrics = collectTokenMetrics(payload, {
+          includeCounts: cfg.showTokens,
+          includeSpeed: cfg.showTokenSpeed,
+          homedir: deps.tokenMetricsHomedir,
+          conversationsDir: deps.tokenMetricsConversationsDir,
+          loadSqlite: deps.loadSqlite
+        });
+      } catch {
+        tokenMetrics = null;
+      }
+    }
+    stdout(`${renderStatusline(raw, cfg, displayCache, tokenMetrics)}
 `);
     return 0;
   }
@@ -2169,8 +2411,8 @@ async function runCli(args, deps = {}) {
         return 2;
       } finally {
         try {
-          if (flags.lockToken !== "" && import_node_fs6.default.readFileSync(lockPath, "utf8") === flags.lockToken) {
-            import_node_fs6.default.unlinkSync(lockPath);
+          if (flags.lockToken !== "" && import_node_fs7.default.readFileSync(lockPath, "utf8") === flags.lockToken) {
+            import_node_fs7.default.unlinkSync(lockPath);
           }
         } catch {
         }
@@ -2315,14 +2557,14 @@ function triggerBackgroundRefreshIfNeeded(cachePath, cache, payload = null, repa
     return;
   }
   try {
-    if (import_node_fs6.default.existsSync(lockPath)) {
-      const stat = import_node_fs6.default.statSync(lockPath);
+    if (import_node_fs7.default.existsSync(lockPath)) {
+      const stat = import_node_fs7.default.statSync(lockPath);
       const minLockMs = activityRefresh ? 5 * 1e3 : 30 * 1e3;
       if (now.getTime() - stat.mtimeMs < minLockMs) {
         return;
       }
     }
-    import_node_fs6.default.writeFileSync(lockPath, lockToken, { encoding: "utf8", mode: 384 });
+    import_node_fs7.default.writeFileSync(lockPath, lockToken, { encoding: "utf8", mode: 384 });
     spawnQuotaRefresh(cliVersion, lockToken);
   } catch {
   }
@@ -2369,7 +2611,7 @@ function refreshFlags(args) {
 function usageSkipReason(cachePath, lockPath, lockToken, now) {
   let owner = "";
   try {
-    owner = import_node_fs6.default.readFileSync(lockPath, "utf8");
+    owner = import_node_fs7.default.readFileSync(lockPath, "utf8");
   } catch {
   }
   if (lockToken === "" || owner !== lockToken) {
@@ -2401,25 +2643,25 @@ function usageRefreshDue(cache, payload, prevState, marker, now) {
 }
 function takeUsageLock(lockPath, token, now) {
   try {
-    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(lockPath), { recursive: true, mode: 448 });
+    import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(lockPath), { recursive: true, mode: 448 });
   } catch {
     return false;
   }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      import_node_fs6.default.writeFileSync(lockPath, token, { encoding: "utf8", flag: "wx", mode: 384 });
+      import_node_fs7.default.writeFileSync(lockPath, token, { encoding: "utf8", flag: "wx", mode: 384 });
       return true;
     } catch (error) {
       if (error.code !== "EEXIST") {
         return false;
       }
       try {
-        if (now.getTime() - import_node_fs6.default.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
+        if (now.getTime() - import_node_fs7.default.statSync(lockPath).mtimeMs <= usageLockStaleMs) {
           return false;
         }
         const aside = `${lockPath}.stale-${token}`;
-        import_node_fs6.default.renameSync(lockPath, aside);
-        import_node_fs6.default.rmSync(aside, { force: true });
+        import_node_fs7.default.renameSync(lockPath, aside);
+        import_node_fs7.default.rmSync(aside, { force: true });
       } catch (takeoverError) {
         if (takeoverError.code !== "ENOENT") {
           return false;
@@ -2431,11 +2673,11 @@ function takeUsageLock(lockPath, token, now) {
 }
 function saveUsageCache(cachePath, quota, timestamp = /* @__PURE__ */ new Date()) {
   try {
-    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(cachePath), { recursive: true, mode: 448 });
+    import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(cachePath), { recursive: true, mode: 448 });
     const cache = { timestamp: timestamp.toISOString(), source: "usage", models: {}, quota };
-    import_node_fs6.default.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}
+    import_node_fs7.default.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}
 `, { encoding: "utf8", mode: 384 });
-    import_node_fs6.default.chmodSync(cachePath, 384);
+    import_node_fs7.default.chmodSync(cachePath, 384);
   } catch (error) {
     return { ok: false, message: `Could not write the quota cache: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -2479,7 +2721,7 @@ function readRejectionMarker(cachePath) {
     return null;
   }
   try {
-    const marker = JSON.parse(import_node_fs6.default.readFileSync(markerPath, "utf8"));
+    const marker = JSON.parse(import_node_fs7.default.readFileSync(markerPath, "utf8"));
     if (typeof marker.cliVersion !== "string") {
       return null;
     }
@@ -2495,8 +2737,8 @@ function readRejectionMarker(cachePath) {
 }
 function writeRejectionMarker(cachePath, marker) {
   const markerPath = authRejectedPath(cachePath);
-  import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(markerPath), { recursive: true, mode: 448 });
-  import_node_fs6.default.writeFileSync(markerPath, `${JSON.stringify(marker)}
+  import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(markerPath), { recursive: true, mode: 448 });
+  import_node_fs7.default.writeFileSync(markerPath, `${JSON.stringify(marker)}
 `, { encoding: "utf8", mode: 384 });
 }
 function authRejectedFor(cachePath, cliVersion) {
@@ -2508,7 +2750,7 @@ function recordAuthRejection(cachePath, result, cliVersion) {
   }
   try {
     if (result.ok) {
-      import_node_fs6.default.rmSync(authRejectedPath(cachePath), { force: true });
+      import_node_fs7.default.rmSync(authRejectedPath(cachePath), { force: true });
     } else if (result.authRejected && cliVersion !== "" && !authRejectedFor(cachePath, cliVersion)) {
       writeRejectionMarker(cachePath, { cliVersion, rejectedAt: (/* @__PURE__ */ new Date()).toISOString() });
     }
@@ -2543,7 +2785,7 @@ function loadRefreshStateWithFallback(candidates) {
     if (statePath === "") {
       continue;
     }
-    if (import_node_fs6.default.existsSync(statePath)) {
+    if (import_node_fs7.default.existsSync(statePath)) {
       return loadStatuslineRefreshState(statePath);
     }
   }
@@ -2554,7 +2796,7 @@ function loadStatuslineRefreshState(statePath) {
     return null;
   }
   try {
-    const raw = import_node_fs6.default.readFileSync(statePath, "utf8");
+    const raw = import_node_fs7.default.readFileSync(statePath, "utf8");
     const parsed = JSON.parse(raw);
     return {
       conversationId: typeof parsed.conversationId === "string" ? parsed.conversationId : "",
@@ -2570,8 +2812,8 @@ function saveStatuslineRefreshState(statePath, state2) {
     return;
   }
   try {
-    import_node_fs6.default.mkdirSync(import_node_path5.default.dirname(statePath), { recursive: true, mode: 448 });
-    import_node_fs6.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
+    import_node_fs7.default.mkdirSync(import_node_path6.default.dirname(statePath), { recursive: true, mode: 448 });
+    import_node_fs7.default.writeFileSync(statePath, `${JSON.stringify(state2, null, 2)}
 `, { encoding: "utf8", mode: 384 });
   } catch {
   }
@@ -2583,7 +2825,7 @@ function mergeStatuslineRefreshState(prevState, payload, activityRefresh, now) {
     lastActivityAt: prevState?.lastActivityAt
   };
   if (payload) {
-    next.conversationId = (payload.conversation_id ?? "").trim();
+    next.conversationId = safeString(payload.conversation_id);
     next.agentState = normalizeAgentState(payload.agent_state);
   }
   if (activityRefresh) {
@@ -2595,7 +2837,7 @@ function shouldTriggerActivityRefresh(cache, payload, prevState, now) {
   if (!payload) {
     return false;
   }
-  const conversationId = (payload.conversation_id ?? "").trim();
+  const conversationId = safeString(payload.conversation_id);
   const agentState = normalizeAgentState(payload.agent_state);
   const prevConversationId = prevState?.conversationId ?? "";
   const prevAgentState = prevState?.agentState ?? "";
@@ -2633,8 +2875,11 @@ function activeModelQuotaLooksUntouched(cache, payload) {
   }
   return quota.remainingFraction >= 1;
 }
+function safeString(raw) {
+  return typeof raw === "string" ? raw.trim() : "";
+}
 function normalizeAgentState(raw) {
-  return (raw ?? "").trim().toLowerCase();
+  return safeString(raw).toLowerCase();
 }
 function cacheLooksUntouched(cache) {
   if (!cache || !cache.models) {

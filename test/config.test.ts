@@ -78,6 +78,26 @@ test("show_mode is on by default and honored from config JSON", () => {
   assert.equal(parseConfig(JSON.stringify({ show_mode: false })).showMode, false);
 });
 
+test("token metrics options default to off and honor boolean overrides", () => {
+  const defaults = defaultConfig();
+  assert.equal(defaults.showTokens, false);
+  assert.equal(defaults.showTokenSpeed, false);
+
+  const enabled = parseConfig(JSON.stringify({
+    show_tokens: true,
+    show_token_speed: true
+  }));
+  assert.equal(enabled.showTokens, true);
+  assert.equal(enabled.showTokenSpeed, true);
+
+  const partial = parseConfig(JSON.stringify({
+    show_tokens: true,
+    show_token_speed: "yes"
+  }));
+  assert.equal(partial.showTokens, true);
+  assert.equal(partial.showTokenSpeed, false);
+});
+
 // Notepad and Windows PowerShell's Set-Content -Encoding utf8 write a UTF-8 BOM. JSON.parse rejects
 // it, which used to drop the whole file silently and render with the defaults.
 test("a config file that starts with a UTF-8 byte order mark is still read", () => {
